@@ -556,7 +556,7 @@ def main(reload=False):
     logging.info(f"Args: {args}")
     # app.on_startup(lambda: create_ui(args,))
     create_ui(args)
-    ui.run(title='herken', native=False, show=False, reload=reload)
+    ui.run(title='harken', native=False, show=False, reload=reload)
 
 
 if __name__ in {'__main__', '__mp_main__'}:
