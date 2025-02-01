@@ -19,7 +19,7 @@ setup(
             # Example:
             # 'your_script = your_package.module:function',
             'srst-harken=harken.harken:main',
-            'srst-herken=harken.herken:main'
+            # 'srst-herken=harken.herken:main'
         ],
     },
     author='Yuri Bochkarev',
@@ -27,7 +27,7 @@ setup(
     description='Listen to your podcasts and read the text',
     long_description='', #open('README.md').read(),
     long_description_content_type='text/markdown',  # Requires setuptools>=38.6.0
-    url='https://github.com/balta2ar/harken',
+    url='https://github.com/balta2ar/srst-harken',
     classifiers=[
         # Classifiers help users find your project. Full list:
         # https://pypi.org/classifiers/
