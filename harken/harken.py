@@ -43,7 +43,6 @@ def slurp_lines(path):
     with open(path) as f:
         return f.readlines()
 
-
 @dataclass
 class SearchResult:
     filename: str
@@ -52,6 +51,14 @@ class SearchResult:
     end: str
     def as_sub_and_media(self) -> SubAndMedia:
         return SubAndMedia(sub=self.filename, media=link_to_media(self.filename))
+    def offset(self) -> int:
+        # TODO: this is not efficient to send a new request for each offset,
+        # it's server that should return the offset in search results
+        results = api.search_text(query="", scope=self.filename)
+        for i, result in enumerate(results):
+            if result.start == self.start:
+                return i
+        return 0
 
 class UttaleAPI:
     def __init__(self, base_url: str):
@@ -72,7 +79,7 @@ class UttaleAPI:
                 response_time = perf_counter() - start_time
 
                 response_json = loads(data.decode())
-                self.logger.info(f"Received in {response_time:.3f}s: {response_json}")
+                self.logger.info(f"Received in {response_time:.3f}s: response size: {len(response_json)}")
                 return response_json
 
         except URLError as e:
@@ -219,7 +226,7 @@ def load_subtitles(scope) -> List[Subtitle]:
             end_time=r.end,
             end=parse_ts(r.end),
             text=r.text,
-            offset=i
+            offset=i,
         )
         for i, r in enumerate(api.search_text(query="", scope=scope))
     ]
@@ -299,8 +306,7 @@ def create_ui(args):
         with ui.column().classes("border w-full"):
             for result in results:
                 print("result", result)
-                offset = -1 # TODO: fixme
-                on_click = lambda result=result: load_media(result.as_sub_and_media(), offset)
+                on_click = lambda result=result: load_media(result.as_sub_and_media(), result.offset())
                 content = result.text
                 content = re.sub(rf"({query})", r"<b>\1</b>", content, flags=re.IGNORECASE)
                 ui.html(content).classes("pl-4 hover:outline-1 hover:outline-dashed").on("click", on_click)
