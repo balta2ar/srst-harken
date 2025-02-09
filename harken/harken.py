@@ -92,7 +92,7 @@ class UttaleAPI:
             self.logger.error(f"API Error: {e}")
             return None
 
-    def search_scopes(self, query: str, limit: int = 1000) -> List[str]:
+    def search_scopes(self, query: str, limit: int = 1000) -> list[str]:
         result = self._make_request("/uttale/Scopes", {
             "q": query,
             "limit": limit,
@@ -101,7 +101,7 @@ class UttaleAPI:
             return result["results"]
         return []
 
-    def search_text(self, query: str, scope: str = "", limit: int = 1000) -> List[SearchResult]:
+    def search_text(self, query: str, scope: str = "", limit: int = 1000) -> list[SearchResult]:
         result = self._make_request("/uttale/Search", {
             "q": query,
             "scope": scope,
@@ -211,9 +211,9 @@ class SubtitleLines:
 
 @dataclass
 class UiState:
-    files: List[SubAndMedia]
+    files: list[SubAndMedia]
     current_file: SubAndMedia
-    subtitles: [Subtitle]
+    subtitles: list[Subtitle]
     sub_lines: SubtitleLines
     player: MyPlayer
     button_record: Button
@@ -223,9 +223,9 @@ class UiState:
     search_query: str
     search_scope_field: Input
     search_scope: str
-    commands: [Callable]
+    commands: list[Callable]
 
-def load_subtitles(scope) -> List[Subtitle]:
+def load_subtitles(scope) -> list[Subtitle]:
     return [
         Subtitle(
             start_time=r.start,
