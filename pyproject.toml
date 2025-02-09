@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = [
-    "nicegui>=2.10.1",
-    "pydantic>=2.10.6",
-]
+dependencies = ["nicegui>=2.10.1", "pydantic>=2.10.6"]
+
+[project.scripts]
+srst-harken = "harken.harken:main"
+
+[tool.setuptools]
+packages = ["harken"]
