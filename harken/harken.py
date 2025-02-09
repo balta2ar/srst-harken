@@ -11,12 +11,13 @@ import re
 import time
 from bisect import bisect_left
 from collections import defaultdict, namedtuple
+from collections.abc import Iterable
 from dataclasses import dataclass
 from inspect import isgenerator
 from os.path import exists, join, splitext
 from pathlib import Path
 from pprint import pprint
-from typing import Callable, Iterable, List
+from typing import Callable, List
 
 from nicegui import app, ui
 from nicegui.elements.audio import Audio
@@ -25,22 +26,22 @@ from nicegui.elements.input import Input
 from nicegui.events import KeyEventArguments
 from pydantic import BaseModel
 
-ASSETS = './assets'
+ASSETS = "./assets"
 logging.basicConfig(level=logging.DEBUG)
 logging.info(f"Starting harken. ASSETS={ASSETS}")
 
-MEDIA = set(['.mp3', '.mp4', '.mkv', '.avi', '.webm', '.opus', '.ogg'])
-SUBS = set(['.vtt'])
+MEDIA = {".mp3", ".mp4", ".mkv", ".avi", ".webm", ".opus", ".ogg"}
+SUBS = {".vtt"}
 
-NamedPair = namedtuple('NamedPair', ['sub', 'media'])
+NamedPair = namedtuple("NamedPair", ["sub", "media"])
 
 def slurp(path):
     logging.info(f"Slurping {path}")
-    with open(path, 'rb') as f:
+    with open(path, "rb") as f:
         return f.read()
 
 def slurp_lines(path):
-    with open(path, 'r') as f:
+    with open(path) as f:
         return f.readlines()
 
 def traverse(basedir):
@@ -60,17 +61,17 @@ def search_index(index, q):
     results = index.search(q)
     out = []
     for doc in [index.get_document(result) for result in results]:
-        sub = doc['filename']
+        sub = doc["filename"]
         for ext in MEDIA:
             path = with_extension(sub, ext)
             if exists(sub) and exists(path):
                 out.append(SearchResult(
-                    content=doc['content'],
-                    id=doc['id'],
-                    title=with_extension(doc['filename'], ext),
-                    offset=doc['offset'],
-                    subtitle=doc['filename'],
-                    media=with_extension(doc['filename'], ext)
+                    content=doc["content"],
+                    id=doc["id"],
+                    title=with_extension(doc["filename"], ext),
+                    offset=doc["offset"],
+                    subtitle=doc["filename"],
+                    media=with_extension(doc["filename"], ext),
                 ).dict())
     return out
 
@@ -81,8 +82,8 @@ def parse_ts_int(s):
     00:00:26,240
     00:00:09.320
     """
-    h, m, s_ms = s.split(':')
-    s, ms = s_ms.replace('.', ',').split(',')
+    h, m, s_ms = s.split(":")
+    s, ms = s_ms.replace(".", ",").split(",")
     return int(h) * 3600000 + int(m) * 60000 + int(s) * 1000 + int(ms)
 
 def parse_ts(s):
@@ -116,12 +117,12 @@ class Search:
         # return [doc['media'] for doc in self.docs.values() if needle in doc['media']]
     def content(self, documents):
         t0 = time.time()
-        self.docs.update({doc['id']: doc for doc in documents})
-        def tokenize(text): return re.findall(r'\b[a-zA-Z0-9åøæÅØÆ]+\b', text.lower())
+        self.docs.update({doc["id"]: doc for doc in documents})
+        def tokenize(text): return re.findall(r"\b[a-zA-Z0-9åøæÅØÆ]+\b", text.lower())
         for document in documents:
-            doc_id = document['id']
+            doc_id = document["id"]
             # title = document['title']
-            content = document['content']
+            content = document["content"]
             for term in tokenize(content):
                 self.plist[term].add(doc_id)
         for term in self.plist:
@@ -136,12 +137,12 @@ class Search:
         logging.info(f"Searching for '{query_words}'")
         sets_of_words = [list(self._trigram_words(w)) for w in query_words]
         if not sets_of_words: return []
-        logging.info(f'Words mapped to trigrams: {sets_of_words}')
+        logging.info(f"Words mapped to trigrams: {sets_of_words}")
 
         # trigrams(word) map to many terms, so it's union between trigrams mapped to terms
         # but since the query itself assumes AND, we intersect between sets of terms
         result = self._search(sets_of_words[0], set.union)
-        logging.info(f'Result after first word: {result}')
+        logging.info(f"Result after first word: {result}")
         for words in sets_of_words[1:]:
             result = result.intersection(self._search(words, set.union))
 
@@ -169,34 +170,34 @@ def consume(line, pattern, *parsers):
     if not matches: raise ValueError(f"Pattern {pattern} did not match line {line}")
     return tuple(parser(group) for parser, group in zip(parsers, matches.groups()))
 
-RX_TIMESTAMP = r'(\d{2}:\d{2}:\d{2}[,.]\d{3}) --> (\d{2}:\d{2}:\d{2}[,.]\d{3})'
+RX_TIMESTAMP = r"(\d{2}:\d{2}:\d{2}[,.]\d{3}) --> (\d{2}:\d{2}:\d{2}[,.]\d{3})"
 
 def parse_subtitles(filename) -> Iterable[Subtitle]:
     suffix = splitext(filename)[1]
     match suffix:
-        case '.srt': return parse_srt(open(filename))
-        case '.vtt': return parse_vtt(open(filename))
+        case ".srt": return parse_srt(open(filename))
+        case ".vtt": return parse_vtt(open(filename))
         case _: raise ValueError(f"Unknown subtitle format {suffix}")
 
 def parse_srt(lines) -> Iterable[Subtitle]:
     if not isgenerator(lines): lines = iter(lines)
     for line in lines:
-        i = consume(line, r'(\d+)', int)
+        i = consume(line, r"(\d+)", int)
         start_str, end_str = consume(next(lines), RX_TIMESTAMP, str, str)
-        text = consume(next(lines), r'(.*)', str)[0]
-        _ = consume(next(lines), r'^$')
+        text = consume(next(lines), r"(.*)", str)[0]
+        _ = consume(next(lines), r"^$")
         s = parse_ts(start_str)
         e = parse_ts(end_str)
         yield Subtitle(start_time=start_str, start=s, end_time=end_str, end=e, text=text, offset=i[0])
 
 def parse_vtt(lines) -> Iterable[Subtitle]:
     if not isgenerator(lines): lines = iter(lines)
-    _ = consume(next(lines), r'^WEBVTT$')
-    _ = consume(next(lines), r'^$')
+    _ = consume(next(lines), r"^WEBVTT$")
+    _ = consume(next(lines), r"^$")
     for i, line in enumerate(lines):
         start_str, end_str = consume(line, RX_TIMESTAMP, str, str)
-        text = consume(next(lines), r'(.*)', str)[0]
-        _ = consume(next(lines), r'^$')
+        text = consume(next(lines), r"(.*)", str)[0]
+        _ = consume(next(lines), r"^$")
         s = parse_ts(start_str)
         e = parse_ts(end_str)
         yield Subtitle(start_time=start_str, start=s, end_time=end_str, end=e, text=text, offset=i)
@@ -226,8 +227,8 @@ class Corpus:
             for line in parse_subtitles(file.sub):
                 docs.append({
                     "id": self.doc_id,
-                    "sub": f'{file.sub}',
-                    "media": f'{file.media}',
+                    "sub": f"{file.sub}",
+                    "media": f"{file.media}",
                     "content": line.text,
                     "offset": self.doc_id - start_doc_id,
                 })
@@ -236,15 +237,15 @@ class Corpus:
         return docs
 
 def test_parse():
-    srt = 'w/byday/20230904/by10m/by10m_03.srt'
+    srt = "w/byday/20230904/by10m/by10m_03.srt"
     lines = list(parse_subtitles(join(MEDIA_DIR, srt)))
     pprint(lines)
-    vtt = 'w/byday/20230904/by10m/by10m_03.vtt'
+    vtt = "w/byday/20230904/by10m/by10m_03.vtt"
     lines = list(parse_subtitles(join(MEDIA_DIR, vtt)))
     pprint(lines)
 
 def test_vtt():
-    vtt = 'h/ukesnytt/20240331/by10m/by10m_01.vtt'
+    vtt = "h/ukesnytt/20240331/by10m/by10m_01.vtt"
     lines = list(parse_subtitles(vtt))
     pprint(lines)
 
@@ -274,7 +275,7 @@ def test_search():
     # equals([1], search.transform("smukke"))
 
 def overwrite_style():
-    ui.add_css('''
+    ui.add_css("""
 :root {
     --nicegui-default-padding: 0.1rem;
     --nicegui-default-gap: 0.1rem;
@@ -282,7 +283,7 @@ def overwrite_style():
 .active {
     background-color: #dfffd6;
 }
-''')
+""")
 
 class MyPlayer:
     def __init__(self, player: Audio):
@@ -313,10 +314,10 @@ class SubtitleLines:
         if isinstance(at, int): index = at
         elif isinstance(at, float): index = max(0, bisect_left(self.starts, at)-1)
         else: raise ValueError(f"Invalid type {type(at)}: {at}")
-        self.lines[self.current_line].classes(remove='active')
+        self.lines[self.current_line].classes(remove="active")
         valid = 0 <= index < len(self.lines)
         if valid:
-            self.lines[index].classes(add='active')
+            self.lines[index].classes(add="active")
             self.current_line = index
     def add(self, line, start):
         self.lines.append(line)
@@ -360,8 +361,8 @@ def create_ui(args):
         button_play=None,
         button_compress=None,
         search_field=None,
-        search_query='',
-        commands=[]
+        search_query="",
+        commands=[],
     )
     logging.info(f"Media files: {len(files)}")
 
@@ -390,26 +391,22 @@ def create_ui(args):
         state.sub_lines.activate(at)
 
     def on_key(ev: KeyEventArguments):
-        if ev.key == 'v' and ev.action.keydown:
+        if (ev.key == "v" and ev.action.keydown) or (ev.key == "t" and ev.action.keydown):
             state.player.toggle()
-        elif ev.key == 't' and ev.action.keydown:
-            state.player.toggle()
-        elif ev.key == 'w' and ev.action.keydown:
+        elif ev.key == "w" and ev.action.keydown:
             replay_current_line()
-        elif ev.key == 'q' and ev.action.keydown:
+        elif ev.key == "q" and ev.action.keydown:
             play_previous_line()
-        elif ev.key == 'f' and ev.action.keydown:
+        elif ev.key == "f" and ev.action.keydown:
             play_next_line()
-        elif ev.key == 'r' and ev.action.keydown:
-            state.button_record.run_method('click')
-        elif ev.key == 'p' and ev.action.keydown:
-            state.button_play.run_method('click')
-        elif ev.key == 's' and ev.action.keydown:
-            state.button_play.run_method('click')
-        elif ev.key == 'c' and ev.action.keydown:
-            state.button_compress.run_method('click')
-        elif ev.key == 'k' and ev.action.keydown:
-            state.search_field.run_method('focus')
+        elif ev.key == "r" and ev.action.keydown:
+            state.button_record.run_method("click")
+        elif (ev.key == "p" and ev.action.keydown) or (ev.key == "s" and ev.action.keydown):
+            state.button_play.run_method("click")
+        elif ev.key == "c" and ev.action.keydown:
+            state.button_compress.run_method("click")
+        elif ev.key == "k" and ev.action.keydown:
+            state.search_field.run_method("focus")
 
     @ui.refreshable
     def redraw_search(query=None):
@@ -417,20 +414,20 @@ def create_ui(args):
         ids = search.search(query)[0:10]
         docs = search.get_documents(ids) # content, id, media, offset, sub
         # with ui.scroll_area().classes('border w-full h-80'):
-        with ui.column().classes('border w-full'):
+        with ui.column().classes("border w-full"):
             for doc in docs:
-                print('doc', doc)
-                on_click = lambda doc=doc: load_media(doc['media'], doc['offset'])
-                content = doc['content']
-                content = re.sub(rf'({query})', r'<b>\1</b>', content, flags=re.IGNORECASE)
-                ui.html(content).classes('pl-4 hover:outline-1 hover:outline-dashed').on('click', on_click)
+                print("doc", doc)
+                on_click = lambda doc=doc: load_media(doc["media"], doc["offset"])
+                content = doc["content"]
+                content = re.sub(rf"({query})", r"<b>\1</b>", content, flags=re.IGNORECASE)
+                ui.html(content).classes("pl-4 hover:outline-1 hover:outline-dashed").on("click", on_click)
     def on_search(e):
         nonlocal state
         state.search_query = e.value
         redraw_search.refresh(e.value)
     async def on_record_toggle(self):
         print(self)
-        recording = await ui.run_javascript('''
+        recording = await ui.run_javascript("""
 if (window.recorder && window.recorder.state === 'recording') {
     window.recorder.stop()
     return false
@@ -464,10 +461,10 @@ if (window.recorder && window.recorder.state === 'recording') {
     })
     return true
 }
-''')
+""")
         state.button_record.props(f'color={"red" if recording else "green"}')
     async def on_record_play():
-        await ui.run_javascript('''
+        await ui.run_javascript("""
 if (window.recorder && window.recorder.state === 'recording') {
     window.recorder.addEventListener('stop', e => {
         window.audio.play()
@@ -477,10 +474,10 @@ if (window.recorder && window.recorder.state === 'recording') {
 }
 window.audio.play()
 return true
-''')
+""")
         state.button_record.props(f'color={"green"}')
     def on_add_dynamic_compression(self):
-        ui.run_javascript('''
+        ui.run_javascript("""
 const context = new AudioContext()
 const audioElement = document.querySelector('audio')
 const source = context.createMediaElementSource(audioElement)
@@ -495,7 +492,7 @@ compressor.release.setValueAtTime(0.25, context.currentTime) // seconds
 source.connect(compressor)
 compressor.connect(context.destination)
 console.log('Dynamic compression added')
-''')
+""")
         self.sender.props(f'color={"green"}')
         self.sender.disable()
 
@@ -503,7 +500,7 @@ console.log('Dynamic compression added')
     def draw():
         keyboard = ui.keyboard(on_key=on_key)
         nonlocal state
-        shortcuts = '''
+        shortcuts = """
 v / t -- Toggle player |
 w -- Replay current line |
 q -- Play previous line |
@@ -512,52 +509,53 @@ r -- Record |
 p / s -- Play |
 c -- Compress |
 k -- Focus on search field
-'''
-        with ui.row().classes('w-full'):
-            state.search_field = ui.input(label='Search by word',
+"""
+        with ui.row().classes("w-full"):
+            state.search_field = ui.input(label="Search by word",
                                           value=state.search_query,
-                                          placeholder='Type something to search',
-                                          on_change=on_search).classes('w-2/12 pl-1').tooltip(shortcuts)
-            state.button_record = ui.button('R').on('click', on_record_toggle).tooltip('Record audio')
-            state.button_play = ui.button('P').on('click', on_record_play).tooltip('Play recorded audio')
-            state.button_compress = ui.button('C').on('click', on_add_dynamic_compression).tooltip('Add dynamic compression')
-            state.player.player = ui.audio(state.current_file.media).classes('w-8/12')
-            state.player.player.on('timeupdate', player_update)
-        with ui.row().classes('w-full'):
-            with ui.column().classes('border w-4/12'):
-                with ui.scroll_area().classes('border w-full h-80'):
+                                          placeholder="Type something to search",
+                                          on_change=on_search).classes("w-2/12 pl-1").tooltip(shortcuts)
+            state.button_record = ui.button("R").on("click", on_record_toggle).tooltip("Record audio")
+            state.button_play = ui.button("P").on("click", on_record_play).tooltip("Play recorded audio")
+            state.button_compress = ui.button("C").on("click", on_add_dynamic_compression).tooltip("Add dynamic compression")
+            state.player.player = ui.audio(state.current_file.media).classes("w-8/12")
+            state.player.player.on("timeupdate", player_update)
+        with ui.row().classes("w-full"):
+            with ui.column().classes("border w-4/12"):
+                with ui.scroll_area().classes("border w-full h-80"):
                     for f in files:
                         on_click = lambda f=f: load_media(f.media)
-                        classes = 'hover:underline cursor-pointer'
-                        if f == state.current_file: classes += ' active'
-                        ui.label(f.media).on('click', on_click).classes(classes)
+                        classes = "hover:underline cursor-pointer"
+                        if f == state.current_file: classes += " active"
+                        ui.label(f.media).on("click", on_click).classes(classes)
                 redraw_search(state.search_query)
             # with ui.column().classes('border w-5/12'):
-            with ui.scroll_area().classes('border w-7/12 h-[90vh]'):
+            with ui.scroll_area().classes("border w-7/12 h-[90vh]"):
                 with ui.row():
                     state.sub_lines.reset()
                     for s in state.subtitles:
                         on_click = lambda s=s: play_line(s)
-                        with ui.row().classes('hover:ring-1'):
+                        with ui.row().classes("hover:ring-1"):
                             # l = ui.label(f'{s.text}').on('dblclick', on_click)
-                            l = ui.label(f'{s.text}').on('click', on_click)
+                            l = ui.label(f"{s.text}").on("click", on_click)
                             state.sub_lines.add(l, s.start)
         for c in state.commands: c()
         state.commands.clear()
-    @ui.page('/')
+    @ui.page("/")
     def main_page():
         overwrite_style()
         draw()
 
 def main(reload=False):
     parser = argparse.ArgumentParser()
-    parser.add_argument('dirs', nargs='+', help='Media directories, can be several')
+    # parser.add_argument('dirs', nargs='+', help='Media directories, can be several')
+    parser.add_argument("--uttale", help="Uttale API base URL", default="http://localhost:7010")
     args = parser.parse_args()
     logging.info(f"Args: {args}")
     # app.on_startup(lambda: create_ui(args,))
     create_ui(args)
-    ui.run(title='harken', native=False, show=False, reload=reload)
+    ui.run(title="harken", native=False, show=False, reload=reload)
 
 
-if __name__ in {'__main__', '__mp_main__'}:
+if __name__ in {"__main__", "__mp_main__"}:
     main(reload=True)
