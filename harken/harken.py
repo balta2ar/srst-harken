@@ -3,6 +3,10 @@
 # ideas
 # - display part of speech, color code (especially adjectives and verbs)
 # - copy audio to clipboard (extract with ffmpeg + pyperclip/xclip)
+# - mark sentences as favorites (saved server-side)
+# - favorites view
+# - allow overwriting subtitles (in case there are errors). should be stored server-side
+# - command / script to export favorites to a telegram channel
 
 import argparse
 import logging
@@ -32,6 +36,8 @@ logging.basicConfig(level=logging.DEBUG)
 MEDIA = {".mp3", ".mp4", ".mkv", ".avi", ".webm", ".opus", ".ogg"}
 SUBS = {".vtt"}
 
+SCOPE_LIMIT = 100
+SEARCH_LIMIT = 100
 SubAndMedia = namedtuple("NamedPair", ["sub", "media"])
 
 def slurp(path):
@@ -206,7 +212,6 @@ class SubtitleLines:
 @dataclass
 class UiState:
     files: List[SubAndMedia]
-    media2file: dict
     current_file: SubAndMedia
     subtitles: [Subtitle]
     sub_lines: SubtitleLines
@@ -216,6 +221,8 @@ class UiState:
     button_compress: Button
     search_field: Input
     search_query: str
+    search_scope_field: Input
+    search_scope: str
     commands: [Callable]
 
 def load_subtitles(scope) -> List[Subtitle]:
@@ -237,13 +244,12 @@ def link_to_media(vtt: str) -> str:
 
 def create_ui(args):
     where = "Erlend"
-    scopes = api.search_scopes(where, limit=10)
+    scopes = api.search_scopes(where, limit=SCOPE_LIMIT)
     files = [SubAndMedia(sub=vtt, media=link_to_media(vtt)) for vtt in scopes]
     subtitles = load_subtitles(scopes[0])
 
     state = UiState(
-        files=sorted(list(set(files)), key=lambda x: x.media),
-        media2file={m.media: m for m in files},
+        files=files,
         current_file=files[0],
         subtitles=subtitles,
         sub_lines=SubtitleLines(),
@@ -253,6 +259,8 @@ def create_ui(args):
         button_compress=None,
         search_field=None,
         search_query="",
+        search_scope_field=None,
+        search_scope=where,
         commands=[],
     )
     logging.info(f"Media files: {len(files)}")
@@ -299,10 +307,21 @@ def create_ui(args):
             state.search_field.run_method("focus")
 
     @ui.refreshable
-    def redraw_search(query=None):
+    def redraw_scopes(scope: str = None) -> None:
+        scopes = api.search_scopes(state.search_scope, limit=SCOPE_LIMIT)
+        files = [SubAndMedia(sub=vtt, media=link_to_media(vtt)) for vtt in scopes]
+        state.files = files
+        with ui.scroll_area().classes("border w-full h-80"):
+            for f in state.files:
+                on_click = lambda f=f: load_media(f)
+                classes = "hover:underline cursor-pointer"
+                if f == state.current_file: classes += " active"
+                ui.label(f.sub).on("click", on_click).classes(classes)
+
+    @ui.refreshable
+    def redraw_search(query: str = None, scope: str = None) -> None:
         if not query: return
-        results = api.search_text(query, scope=where, limit=10)
-        # with ui.scroll_area().classes('border w-full h-80'):
+        results = api.search_text(query, scope=scope, limit=SEARCH_LIMIT)
         with ui.column().classes("border w-full"):
             for result in results:
                 print("result", result)
@@ -310,10 +329,18 @@ def create_ui(args):
                 content = result.text
                 content = re.sub(rf"({query})", r"<b>\1</b>", content, flags=re.IGNORECASE)
                 ui.html(content).classes("pl-4 hover:outline-1 hover:outline-dashed").on("click", on_click)
+
+    def on_change_scope(e):
+        nonlocal state
+        state.search_scope = state.search_scope_field.value
+        redraw_scopes.refresh(state.search_scope)
+
     def on_search(e):
         nonlocal state
-        state.search_query = e.value
-        redraw_search.refresh(e.value)
+        state.search_query = state.search_field.value
+        state.search_scope = state.search_scope_field.value
+        redraw_search.refresh(state.search_query, state.search_scope_field.value)
+
     async def on_record_toggle(self):
         print(self)
         recording = await ui.run_javascript("""
@@ -400,6 +427,10 @@ c -- Compress |
 k -- Focus on search field
 """
         with ui.row().classes("w-full"):
+            state.search_scope_field = ui.input(label="Search scope",
+                                                value=state.search_scope,
+                                                placeholder="Type something to search",
+                                                on_change=on_change_scope).classes("w-2/12 pl-1").tooltip(shortcuts)
             state.search_field = ui.input(label="Search by word",
                                           value=state.search_query,
                                           placeholder="Type something to search",
@@ -407,17 +438,12 @@ k -- Focus on search field
             state.button_record = ui.button("R").on("click", on_record_toggle).tooltip("Record audio")
             state.button_play = ui.button("P").on("click", on_record_play).tooltip("Play recorded audio")
             state.button_compress = ui.button("C").on("click", on_add_dynamic_compression).tooltip("Add dynamic compression")
-            state.player.player = ui.audio(state.current_file.media).classes("w-8/12")
+            state.player.player = ui.audio(state.current_file.media).classes("w-5/12")
             state.player.player.on("timeupdate", player_update)
         with ui.row().classes("w-full"):
             with ui.column().classes("border w-4/12"):
-                with ui.scroll_area().classes("border w-full h-80"):
-                    for f in files:
-                        on_click = lambda f=f: load_media(f)
-                        classes = "hover:underline cursor-pointer"
-                        if f == state.current_file: classes += " active"
-                        ui.label(f.sub).on("click", on_click).classes(classes)
-                redraw_search(state.search_query)
+                redraw_scopes(state.search_scope)
+                redraw_search(state.search_query, state.search_scope)
             # with ui.column().classes('border w-5/12'):
             with ui.scroll_area().classes("border w-7/12 h-[90vh]"):
                 with ui.row():
