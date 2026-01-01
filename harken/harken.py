@@ -171,6 +171,16 @@ def parse_ts_int(s):
 def parse_ts(s):
     return parse_ts_int(s) / 1000.0
 
+def format_ts(seconds):
+    ms = int((seconds % 1) * 1000)
+    m, s = divmod(int(seconds), 60)
+    h, m = divmod(m, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
+
+def clip_ts(ts_string: str, offset_float: float) -> str:
+    new_seconds = max(0.0, parse_ts(ts_string) + offset_float)
+    return format_ts(new_seconds)
+
 class Subtitle(BaseModel):
     start_time: str
     start: float
@@ -326,25 +336,13 @@ def create_ui(args):
 
     def copy_audio_segment():
         indices = sorted(list(state.sub_lines.active_indices))
-        if not indices:
-            return
+        if not indices: return
 
         start_sub = state.subtitles[indices[0]]
         end_sub = state.subtitles[indices[-1]]
 
-        # Add 500ms margin, ensuring start is not negative
-        start_time_sec = max(0.0, parse_ts(start_sub.start_time) - 0.5)
-        end_time_sec = parse_ts(end_sub.end_time) + 0.5
-
-        def format_ts(seconds):
-            ms = int((seconds % 1) * 1000)
-            m, s = divmod(int(seconds), 60)
-            h, m = divmod(m, 60)
-            return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
-
-        start_str = format_ts(start_time_sec)
-        end_str = format_ts(end_time_sec)
-
+        start_str = clip_ts(start_sub.start_time, -0.5)
+        end_str = clip_ts(end_sub.end_time, +0.5)
         audio_filename = with_extension(state.current_file.sub, ".ogg")
         audio_data = api.get_audio(audio_filename, start_str, end_str)
 
