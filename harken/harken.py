@@ -304,6 +304,8 @@ def create_ui(args):
         state.sub_lines.activate(at)
 
     def on_key(ev: KeyEventArguments):
+        if ev.modifiers:
+            return
         if (ev.key == "v" and ev.action.keydown) or (ev.key == "t" and ev.action.keydown):
             state.player.toggle()
         elif ev.key == "w" and ev.action.keydown:
@@ -332,7 +334,7 @@ def create_ui(args):
                     with open(tmp_path, "wb") as f:
                         f.write(audio_data)
                     copy_to_clipboard(str(tmp_path))
-                    ui.notify(f"Copied audio segment: {safe_hash}.ogg")
+                    ui.notify(f'Copied "{sub.text}" ({safe_hash}.ogg)')
 
     @ui.refreshable
     def redraw_scopes(scope: str = None) -> None:
