@@ -46,7 +46,7 @@ SubAndMedia = namedtuple("NamedPair", ["sub", "media"])
 
 def generate_filename_hash(text: str) -> str:
     digest = hashlib.sha256(text.encode()).digest()
-    return base64.urlsafe_b64encode(digest).decode().rstrip("=")[:10]
+    return base64.urlsafe_b64encode(digest).decode().rstrip("=")[:20]
 
 def copy_to_clipboard(file_path: str):
     uri = Path(file_path).as_uri()
@@ -59,6 +59,12 @@ def slurp(path):
     logging.info(f"Slurping {path}")
     with open(path, "rb") as f:
         return f.read()
+
+def spit_temp(filename: str, data: bytes) -> Path:
+    tmp_path = Path(tempfile.gettempdir()) / filename
+    with open(tmp_path, "wb") as f:
+        f.write(data)
+    return tmp_path
 
 def slurp_lines(path):
     with open(path) as f:
@@ -216,7 +222,7 @@ class SubtitleLines:
         if isinstance(at, int): index = at
         elif isinstance(at, float): index = max(0, bisect_left(self.starts, at)-1)
         else: raise ValueError(f"Invalid type {type(at)}: {at}")
-        
+
         # If the calculated index is already the single active one, do nothing (optimization)
         if len(self.active_indices) == 1 and index in self.active_indices:
             return
@@ -225,14 +231,12 @@ class SubtitleLines:
         self.current_line = index
 
     def set_active(self, indices: List[int]):
-        # Remove active class from currently active lines
         for i in self.active_indices:
             if 0 <= i < len(self.lines):
                 self.lines[i].classes(remove="active")
-        
+
         self.active_indices = set(indices)
-        
-        # Add active class to new active lines
+
         for i in self.active_indices:
             if 0 <= i < len(self.lines):
                 self.lines[i].classes(add="active")
@@ -322,21 +326,17 @@ def create_ui(args):
 
     def copy_audio_segment():
         indices = sorted(list(state.sub_lines.active_indices))
-        if not indices:
-            return
-        
+        if not indices: return
+
         start_sub = state.subtitles[indices[0]]
         end_sub = state.subtitles[indices[-1]]
-        
         audio_filename = with_extension(state.current_file.sub, ".ogg")
         audio_data = api.get_audio(audio_filename, start_sub.start_time, end_sub.end_time)
-        
+
         if audio_data:
             text = " ".join(state.subtitles[i].text for i in indices)
             safe_hash = generate_filename_hash(text)
-            tmp_path = Path(tempfile.gettempdir()) / f"{safe_hash}.ogg"
-            with open(tmp_path, "wb") as f:
-                f.write(audio_data)
+            tmp_path = spit_temp(f"{safe_hash}.ogg", audio_data)
             copy_to_clipboard(str(tmp_path))
             # Truncate text for notification if too long
             display_text = text if len(text) < 50 else text[:47] + "..."
@@ -347,7 +347,7 @@ def create_ui(args):
         (function() {
             const selection = window.getSelection();
             if (selection.isCollapsed) return [];
-            
+
             function getIndex(node) {
                 while (node && node.dataset && !node.dataset.index) {
                     node = node.parentElement;
@@ -373,7 +373,6 @@ def create_ui(args):
                 const max = Math.max(startIdx, endIdx);
                 const result = [];
                 for (let i = min; i <= max; i++) result.push(i);
-                selection.removeAllRanges();
                 return result;
             }
             return [];
@@ -512,6 +511,11 @@ console.log('Dynamic compression added')
         self.sender.props(f'color={"green"}')
         self.sender.disable()
 
+    async def on_line_click(s):
+        # Check if text is selected to prevent playing when selecting text
+        has_selection = await ui.run_javascript("window.getSelection().type === 'Range' && window.getSelection().toString().length > 0")
+        if not has_selection: play_line(s)
+
     @ui.refreshable
     def draw():
         keyboard = ui.keyboard(on_key=on_key)
@@ -550,10 +554,10 @@ m -- Copy audio segment
                 with ui.row():
                     state.sub_lines.reset()
                     for i, s in enumerate(state.subtitles):
-                        on_click = lambda s=s: play_line(s)
+                        # on_click = lambda s=s: play_line(s)
                         with ui.row().classes("hover:ring-1").props(f'data-index={i}') as line_row:
                             # l = ui.label(f'{s.text}').on('dblclick', on_click)
-                            l = ui.label(f"{s.text}").on("click", on_click)
+                            l = ui.label(f"{s.text}").on("click", lambda s=s: on_line_click(s))
                             state.sub_lines.add(line_row, s.start)
         for c in state.commands: c()
         state.commands.clear()
