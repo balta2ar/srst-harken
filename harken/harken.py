@@ -326,12 +326,27 @@ def create_ui(args):
 
     def copy_audio_segment():
         indices = sorted(list(state.sub_lines.active_indices))
-        if not indices: return
+        if not indices:
+            return
 
         start_sub = state.subtitles[indices[0]]
         end_sub = state.subtitles[indices[-1]]
+
+        # Add 500ms margin, ensuring start is not negative
+        start_time_sec = max(0.0, parse_ts(start_sub.start_time) - 0.5)
+        end_time_sec = parse_ts(end_sub.end_time) + 0.5
+
+        def format_ts(seconds):
+            ms = int((seconds % 1) * 1000)
+            m, s = divmod(int(seconds), 60)
+            h, m = divmod(m, 60)
+            return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
+
+        start_str = format_ts(start_time_sec)
+        end_str = format_ts(end_time_sec)
+
         audio_filename = with_extension(state.current_file.sub, ".ogg")
-        audio_data = api.get_audio(audio_filename, start_sub.start_time, end_sub.end_time)
+        audio_data = api.get_audio(audio_filename, start_str, end_str)
 
         if audio_data:
             text = " ".join(state.subtitles[i].text for i in indices)
