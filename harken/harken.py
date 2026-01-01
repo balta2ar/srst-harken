@@ -211,15 +211,32 @@ class SubtitleLines:
         self.lines = []
         self.starts = []
         self.current_line = 0
+        self.active_indices = set()
     def activate(self, at): # float (time in seconds) or int (index, # of the line)
         if isinstance(at, int): index = at
         elif isinstance(at, float): index = max(0, bisect_left(self.starts, at)-1)
         else: raise ValueError(f"Invalid type {type(at)}: {at}")
-        self.lines[self.current_line].classes(remove="active")
-        valid = 0 <= index < len(self.lines)
-        if valid:
-            self.lines[index].classes(add="active")
-            self.current_line = index
+        
+        # If the calculated index is already the single active one, do nothing (optimization)
+        if len(self.active_indices) == 1 and index in self.active_indices:
+            return
+
+        self.set_active([index])
+        self.current_line = index
+
+    def set_active(self, indices: List[int]):
+        # Remove active class from currently active lines
+        for i in self.active_indices:
+            if 0 <= i < len(self.lines):
+                self.lines[i].classes(remove="active")
+        
+        self.active_indices = set(indices)
+        
+        # Add active class to new active lines
+        for i in self.active_indices:
+            if 0 <= i < len(self.lines):
+                self.lines[i].classes(add="active")
+
     def add(self, line, start):
         self.lines.append(line)
         self.starts.append(start)
@@ -303,6 +320,70 @@ def create_ui(args):
         at = await player_position()
         state.sub_lines.activate(at)
 
+    def copy_audio_segment():
+        indices = sorted(list(state.sub_lines.active_indices))
+        if not indices:
+            return
+        
+        start_sub = state.subtitles[indices[0]]
+        end_sub = state.subtitles[indices[-1]]
+        
+        audio_filename = with_extension(state.current_file.sub, ".ogg")
+        audio_data = api.get_audio(audio_filename, start_sub.start_time, end_sub.end_time)
+        
+        if audio_data:
+            text = " ".join(state.subtitles[i].text for i in indices)
+            safe_hash = generate_filename_hash(text)
+            tmp_path = Path(tempfile.gettempdir()) / f"{safe_hash}.ogg"
+            with open(tmp_path, "wb") as f:
+                f.write(audio_data)
+            copy_to_clipboard(str(tmp_path))
+            # Truncate text for notification if too long
+            display_text = text if len(text) < 50 else text[:47] + "..."
+            ui.notify(f'Copied "{display_text}" ({safe_hash}.ogg)')
+
+    async def handle_selection():
+        indices = await ui.run_javascript("""
+        (function() {
+            const selection = window.getSelection();
+            if (selection.isCollapsed) return [];
+            
+            function getIndex(node) {
+                while (node && node.dataset && !node.dataset.index) {
+                    node = node.parentElement;
+                }
+                if (node && node.dataset && node.dataset.index) {
+                    return parseInt(node.dataset.index);
+                }
+                let curr = node;
+                while(curr && curr.nodeType !== 1) curr = curr.parentElement;
+                while(curr) {
+                    if (curr.dataset && curr.dataset.index !== undefined) return parseInt(curr.dataset.index);
+                    curr = curr.parentElement;
+                }
+                return null;
+            }
+
+            const range = selection.getRangeAt(0);
+            const startIdx = getIndex(range.startContainer);
+            const endIdx = getIndex(range.endContainer);
+
+            if (startIdx !== null && endIdx !== null) {
+                const min = Math.min(startIdx, endIdx);
+                const max = Math.max(startIdx, endIdx);
+                const result = [];
+                for (let i = min; i <= max; i++) result.push(i);
+                selection.removeAllRanges();
+                return result;
+            }
+            return [];
+        })()
+        """)
+        if indices:
+            state.sub_lines.set_active(indices)
+            # Update current line to the start of selection for navigation continuity
+            state.sub_lines.current_line = indices[0]
+
     def on_key(ev: KeyEventArguments):
         if ev.modifiers:
             return
@@ -323,18 +404,7 @@ def create_ui(args):
         elif ev.key == "k" and ev.action.keydown:
             state.search_field.run_method("focus")
         elif ev.key == "m" and ev.action.keydown:
-            current_index = state.sub_lines.current_line
-            if 0 <= current_index < len(state.subtitles):
-                sub = state.subtitles[current_index]
-                audio_filename = with_extension(state.current_file.sub, ".ogg")
-                audio_data = api.get_audio(audio_filename, sub.start_time, sub.end_time)
-                if audio_data:
-                    safe_hash = generate_filename_hash(sub.text)
-                    tmp_path = Path(tempfile.gettempdir()) / f"{safe_hash}.ogg"
-                    with open(tmp_path, "wb") as f:
-                        f.write(audio_data)
-                    copy_to_clipboard(str(tmp_path))
-                    ui.notify(f'Copied "{sub.text}" ({safe_hash}.ogg)')
+            copy_audio_segment()
 
     @ui.refreshable
     def redraw_scopes(scope: str = None) -> None:
@@ -476,15 +546,15 @@ m -- Copy audio segment
                 redraw_scopes(state.search_scope)
                 redraw_search(state.search_query, state.search_scope)
             # with ui.column().classes('border w-5/12'):
-            with ui.scroll_area().classes("border w-7/12 h-[90vh]"):
+            with ui.scroll_area().classes("border w-7/12 h-[90vh]").on('mouseup', handle_selection):
                 with ui.row():
                     state.sub_lines.reset()
-                    for s in state.subtitles:
+                    for i, s in enumerate(state.subtitles):
                         on_click = lambda s=s: play_line(s)
-                        with ui.row().classes("hover:ring-1"):
+                        with ui.row().classes("hover:ring-1").props(f'data-index={i}') as line_row:
                             # l = ui.label(f'{s.text}').on('dblclick', on_click)
                             l = ui.label(f"{s.text}").on("click", on_click)
-                            state.sub_lines.add(l, s.start)
+                            state.sub_lines.add(line_row, s.start)
         for c in state.commands: c()
         state.commands.clear()
     @ui.page("/")
