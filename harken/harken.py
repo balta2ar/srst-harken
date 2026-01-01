@@ -11,6 +11,10 @@
 import argparse
 import logging
 import re
+import hashlib
+import base64
+import tempfile
+import subprocess
 from bisect import bisect_left
 from collections import namedtuple
 from dataclasses import dataclass
@@ -39,6 +43,17 @@ SUBS = {".vtt"}
 SCOPE_LIMIT = 1000
 SEARCH_LIMIT = 1000
 SubAndMedia = namedtuple("NamedPair", ["sub", "media"])
+
+def generate_filename_hash(text: str) -> str:
+    digest = hashlib.sha256(text.encode()).digest()
+    return base64.urlsafe_b64encode(digest).decode().rstrip("=")[:10]
+
+def copy_to_clipboard(file_path: str):
+    uri = Path(file_path).as_uri()
+    try:
+        subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'text/uri-list'], input=uri.encode(), check=True)
+    except Exception as e:
+        logging.error(f"Clipboard copy failed: {e}")
 
 def slurp(path):
     logging.info(f"Slurping {path}")
@@ -305,6 +320,19 @@ def create_ui(args):
             state.button_compress.run_method("click")
         elif ev.key == "k" and ev.action.keydown:
             state.search_field.run_method("focus")
+        elif ev.key == "m" and ev.action.keydown:
+            current_index = state.sub_lines.current_line
+            if 0 <= current_index < len(state.subtitles):
+                sub = state.subtitles[current_index]
+                audio_filename = with_extension(state.current_file.sub, ".ogg")
+                audio_data = api.get_audio(audio_filename, sub.start_time, sub.end_time)
+                if audio_data:
+                    safe_hash = generate_filename_hash(sub.text)
+                    tmp_path = Path(tempfile.gettempdir()) / f"{safe_hash}.ogg"
+                    with open(tmp_path, "wb") as f:
+                        f.write(audio_data)
+                    copy_to_clipboard(str(tmp_path))
+                    ui.notify(f"Copied audio segment: {safe_hash}.ogg")
 
     @ui.refreshable
     def redraw_scopes(scope: str = None) -> None:
@@ -424,7 +452,8 @@ f -- Play next line |
 r -- Record |
 p / s -- Play |
 c -- Compress |
-k -- Focus on search field
+k -- Focus on search field |
+m -- Copy audio segment
 """
         with ui.row().classes("w-full"):
             state.search_scope_field = ui.input(label="Search scope",
