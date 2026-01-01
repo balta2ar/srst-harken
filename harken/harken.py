@@ -36,8 +36,8 @@ logging.basicConfig(level=logging.DEBUG)
 MEDIA = {".mp3", ".mp4", ".mkv", ".avi", ".webm", ".opus", ".ogg"}
 SUBS = {".vtt"}
 
-SCOPE_LIMIT = 100
-SEARCH_LIMIT = 100
+SCOPE_LIMIT = 1000
+SEARCH_LIMIT = 1000
 SubAndMedia = namedtuple("NamedPair", ["sub", "media"])
 
 def slurp(path):
@@ -243,7 +243,7 @@ def link_to_media(vtt: str) -> str:
     return f"{api.base_url}/uttale/Audio?filename={quote(media_file)}&start=&end="
 
 def create_ui(args):
-    where = "Erlend"
+    where = ""
     scopes = api.search_scopes(where, limit=SCOPE_LIMIT)
     files = [SubAndMedia(sub=vtt, media=link_to_media(vtt)) for vtt in scopes]
     subtitles = load_subtitles(scopes[0])
