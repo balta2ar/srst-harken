@@ -320,7 +320,9 @@ def create_ui(args):
         state.commands.append(lambda: state.player.seek_and_play(at))
         draw.refresh()
 
-    def play_line(sub: Subtitle): state.player.seek_and_play(sub.start)
+    def play_line(sub: Subtitle):
+        print(f"Playing line {sub.offset} at {sub.start_time}: {sub.text}")
+        state.player.seek_and_play(sub.start)
     def play_line_by_index(index: int):
         index = max(0, min(index, len(state.subtitles)-1))
         state.sub_lines.activate(index)
