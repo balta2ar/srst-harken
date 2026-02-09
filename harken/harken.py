@@ -494,6 +494,7 @@ if (window.recorder && window.recorder.state === 'recording') {
 """)
         state.button_record.props(f'color={"red" if recording else "green"}')
     async def on_record_play():
+        state.player.pause()
         await ui.run_javascript("""
 if (window.recorder && window.recorder.state === 'recording') {
     window.recorder.addEventListener('stop', e => {
