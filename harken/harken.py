@@ -201,6 +201,35 @@ def overwrite_style():
 .active {
     background-color: #dfffd6;
 }
+body {
+    padding-bottom: 5rem;
+}
+.harken-main {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    gap: 0.25rem;
+}
+.harken-main > .harken-browse {
+    width: 100%;
+}
+.harken-main > .harken-read {
+    width: 100%;
+    height: 60vh;
+}
+@media (min-width: 768px) {
+    .harken-main {
+        flex-direction: row;
+    }
+    .harken-main > .harken-browse {
+        width: 33.333%;
+    }
+    .harken-main > .harken-read {
+        width: 66.666%;
+        height: 80vh;
+    }
+}
 """)
 
 class MyPlayer:
@@ -297,15 +326,18 @@ def link_to_media(vtt: str) -> str:
     media_file = with_extension(vtt, ".ogg")
     return f"{uttale_base_url()}/uttale/Audio?filename={quote(media_file)}&start=&end="
 
-def create_ui(args):
-    where = ""
-    scopes = api.search_scopes(where, limit=SCOPE_LIMIT)
+@ui.page("/")
+def main_page(request: Request):
+    overwrite_style()
+    scope = request.query_params.get("scope", "")
+    query = request.query_params.get("text", "")
+    scopes = api.search_scopes(scope, limit=SCOPE_LIMIT)
     files = [SubAndMedia(sub=vtt, media=link_to_media(vtt)) for vtt in scopes]
-    subtitles = load_subtitles(scopes[0])
+    subtitles = load_subtitles(files[0].sub) if files else []
 
     state = UiState(
         files=files,
-        current_file=files[0],
+        current_file=files[0] if files else SubAndMedia(sub="", media=""),
         subtitles=subtitles,
         sub_lines=SubtitleLines(),
         player=MyPlayer(None),
@@ -313,9 +345,9 @@ def create_ui(args):
         button_play=None,
         button_compress=None,
         search_field=None,
-        search_query="",
+        search_query=query,
         search_scope_field=None,
-        search_scope=where,
+        search_scope=scope,
         commands=[],
     )
     logging.info(f"Media files: {len(files)}")
@@ -607,43 +639,45 @@ c -- Compress |
 k -- Focus on search field |
 m -- Copy audio segment
 """
-        with ui.row().classes("w-full"):
+        with ui.row().classes("w-full flex-wrap items-center gap-1"):
             state.search_scope_field = ui.input(label="Search scope",
                                                 value=state.search_scope,
                                                 placeholder="Type something to search",
-                                                on_change=on_change_scope).classes("w-2/12 pl-1").tooltip(shortcuts)
+                                                on_change=on_change_scope).classes("w-full md:w-3/12 pl-1").tooltip(shortcuts)
             state.search_field = ui.input(label="Search by word",
                                           value=state.search_query,
                                           placeholder="Type something to search",
-                                          on_change=on_search).classes("w-2/12 pl-1").tooltip(shortcuts)
-            state.button_record = ui.button("R").on("click", on_record_toggle).tooltip("Record audio")
-            state.button_play = ui.button("P").on("click", on_record_play).tooltip("Play recorded audio")
-            state.button_compress = ui.button("C").on("click", on_add_dynamic_compression).tooltip("Add dynamic compression")
-            state.player.player = ui.audio(link_to_media(state.current_file.sub)).classes("w-5/12")
-            state.player.player.on("timeupdate", player_update)
-        with ui.row().classes("w-full"):
-            with ui.column().classes("border w-4/12"):
+                                          on_change=on_search).classes("w-full md:w-3/12 pl-1").tooltip(shortcuts)
+        with ui.element("div").classes("harken-main"):
+            with ui.column().classes("harken-browse border"):
                 redraw_scopes(state.search_scope)
                 redraw_search(state.search_query, state.search_scope)
-            # with ui.column().classes('border w-5/12'):
-            with ui.scroll_area().classes("border w-7/12 h-[90vh]").on('mouseup', handle_selection):
-                with ui.row():
+            with ui.scroll_area().classes("harken-read border").on('mouseup', handle_selection):
+                with ui.column().classes("w-full gap-0"):
                     state.sub_lines.reset()
                     for i, s in enumerate(state.subtitles):
-                        # on_click = lambda s=s: play_line(s)
-                        with ui.row().classes("hover:ring-1").props(f'data-index={i}') as line_row:
-                            # l = ui.label(f'{s.text}').on('dblclick', on_click)
-                            l = ui.label(f"{s.text}").on("click", lambda s=s: on_line_click(s))
+                        with ui.row().classes("w-full hover:ring-1 py-1").props(f'data-index={i}') as line_row:
+                            ui.label(f"{s.text}").on("click", lambda s=s: on_line_click(s)).classes("cursor-pointer text-lg leading-snug")
                             state.sub_lines.add(line_row, s.start)
+        draw_controls()
         for c in state.commands: c()
         state.commands.clear()
-    @ui.page("/")
-    def main_page(request: Request):
-        nonlocal state
-        state.search_scope = request.query_params.get("scope", state.search_scope)
-        state.search_query = request.query_params.get("text", state.search_query)
-        overwrite_style()
-        draw()
+
+    def draw_controls():
+        with ui.row().classes(
+            "fixed bottom-0 left-0 right-0 z-50 w-full flex-nowrap items-center gap-1 "
+            "bg-white border-t px-1 py-1"
+        ):
+            ui.button(icon="skip_previous", on_click=play_previous_line).props("flat round dense").tooltip("Previous line")
+            ui.button(icon="replay", on_click=replay_current_line).props("flat round dense").tooltip("Replay line")
+            ui.button(icon="play_arrow", on_click=lambda: state.player.toggle()).props("flat round dense").tooltip("Play / pause")
+            ui.button(icon="skip_next", on_click=play_next_line).props("flat round dense").tooltip("Next line")
+            state.player.player = ui.audio(link_to_media(state.current_file.sub)).classes("flex-grow min-w-0")
+            state.player.player.on("timeupdate", player_update)
+            state.button_record = ui.button(icon="mic", on_click=on_record_toggle).props("flat round dense").tooltip("Record")
+            state.button_play = ui.button(icon="hearing", on_click=on_record_play).props("flat round dense").tooltip("Play recording")
+            state.button_compress = ui.button(icon="graphic_eq", on_click=on_add_dynamic_compression).props("flat round dense").tooltip("Compress")
+    draw()
 
 def main(reload=False):
     parser = argparse.ArgumentParser()
@@ -652,10 +686,8 @@ def main(reload=False):
     parser.add_argument("--host", help="Host/interface to bind to", default="0.0.0.0")
     args = parser.parse_args()
     logging.info(f"Args: {args}")
-    # app.on_startup(lambda: create_ui(args,))
     global api
     api = UttaleAPI(args.uttale)
-    create_ui(args)
     ui.run(title="harken", native=False, show=False, reload=reload, host=args.host)
 
 
