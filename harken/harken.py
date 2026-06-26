@@ -428,10 +428,20 @@ def create_ui(args):
         state.files = files
         with ui.scroll_area().classes("border w-full h-80"):
             for f in state.files:
-                on_click = lambda f=f: load_media(f)
-                classes = "hover:underline cursor-pointer"
-                if f == state.current_file: classes += " active"
-                ui.label(f.sub).on("click", on_click).classes(classes)
+                active = " active" if f == state.current_file else ""
+                parts = f.sub.split("/")
+                with ui.row().classes("gap-0 items-center"):
+                    for i, part in enumerate(parts):
+                        if i:
+                            ui.label("/").classes("text-gray-400")
+                        last = i == len(parts) - 1
+                        if last:
+                            on_click = lambda f=f: load_media(f)
+                        else:
+                            prefix = " ".join(parts[: i + 1])
+                            on_click = lambda prefix=prefix: select_scope(prefix)
+                        classes = "hover:underline cursor-pointer" + active
+                        ui.label(part).on("click", on_click).classes(classes)
 
     @ui.refreshable
     def redraw_search(query: str = None, scope: str = None) -> None:
@@ -449,11 +459,15 @@ def create_ui(args):
         query = urlencode({"scope": state.search_scope, "text": state.search_query})
         ui.run_javascript(f"history.replaceState(null, '', '?{query}')")
 
-    def on_change_scope(e):
+    def select_scope(scope: str):
         nonlocal state
-        state.search_scope = state.search_scope_field.value
+        state.search_scope = scope
+        state.search_scope_field.value = scope
         sync_url()
         redraw_scopes.refresh(state.search_scope)
+
+    def on_change_scope(e):
+        select_scope(state.search_scope_field.value)
 
     def on_search(e):
         nonlocal state
