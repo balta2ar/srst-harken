@@ -26,6 +26,7 @@ from urllib.error import URLError
 from urllib.parse import quote, urlencode
 from urllib.request import urlopen
 
+from fastapi import Request
 from nicegui import ui
 from nicegui.elements.audio import Audio
 from nicegui.elements.button import Button
@@ -444,15 +445,21 @@ def create_ui(args):
                 content = re.sub(rf"({query})", r"<b>\1</b>", content, flags=re.IGNORECASE)
                 ui.html(content).classes("pl-4 hover:outline-1 hover:outline-dashed").on("click", on_click)
 
+    def sync_url():
+        query = urlencode({"scope": state.search_scope, "text": state.search_query})
+        ui.run_javascript(f"history.replaceState(null, '', '?{query}')")
+
     def on_change_scope(e):
         nonlocal state
         state.search_scope = state.search_scope_field.value
+        sync_url()
         redraw_scopes.refresh(state.search_scope)
 
     def on_search(e):
         nonlocal state
         state.search_query = state.search_field.value
         state.search_scope = state.search_scope_field.value
+        sync_url()
         redraw_search.refresh(state.search_query, state.search_scope_field.value)
 
     async def on_record_toggle(self):
@@ -609,7 +616,10 @@ m -- Copy audio segment
         for c in state.commands: c()
         state.commands.clear()
     @ui.page("/")
-    def main_page():
+    def main_page(request: Request):
+        nonlocal state
+        state.search_scope = request.query_params.get("scope", state.search_scope)
+        state.search_query = request.query_params.get("text", state.search_query)
         overwrite_style()
         draw()
 
