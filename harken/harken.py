@@ -23,11 +23,11 @@ from pathlib import Path
 from time import perf_counter
 from typing import Callable, List, Optional
 from urllib.error import URLError
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import urlopen
 
 from fastapi import Request
-from nicegui import ui
+from nicegui import context, ui
 from nicegui.elements.audio import Audio
 from nicegui.elements.button import Button
 from nicegui.elements.input import Input
@@ -285,9 +285,17 @@ def load_subtitles(scope) -> list[Subtitle]:
         for i, r in enumerate(api.search_text(query="", scope=scope))
     ]
 
+def uttale_base_url() -> str:
+    request = context.client.request if context.client else None
+    if request is None:
+        return api.base_url
+    port = urlsplit(api.base_url).port
+    host = request.url.hostname
+    return f"{request.url.scheme}://{host}:{port}" if port else f"{request.url.scheme}://{host}"
+
 def link_to_media(vtt: str) -> str:
     media_file = with_extension(vtt, ".ogg")
-    return f"{api.base_url}/uttale/Audio?filename={quote(media_file)}&start=&end="
+    return f"{uttale_base_url()}/uttale/Audio?filename={quote(media_file)}&start=&end="
 
 def create_ui(args):
     where = ""
@@ -611,7 +619,7 @@ m -- Copy audio segment
             state.button_record = ui.button("R").on("click", on_record_toggle).tooltip("Record audio")
             state.button_play = ui.button("P").on("click", on_record_play).tooltip("Play recorded audio")
             state.button_compress = ui.button("C").on("click", on_add_dynamic_compression).tooltip("Add dynamic compression")
-            state.player.player = ui.audio(state.current_file.media).classes("w-5/12")
+            state.player.player = ui.audio(link_to_media(state.current_file.sub)).classes("w-5/12")
             state.player.player.on("timeupdate", player_update)
         with ui.row().classes("w-full"):
             with ui.column().classes("border w-4/12"):
@@ -641,13 +649,14 @@ def main(reload=False):
     parser = argparse.ArgumentParser()
     # parser.add_argument('dirs', nargs='+', help='Media directories, can be several')
     parser.add_argument("--uttale", help="Uttale API base URL", default="http://localhost:7010")
+    parser.add_argument("--host", help="Host/interface to bind to", default="0.0.0.0")
     args = parser.parse_args()
     logging.info(f"Args: {args}")
     # app.on_startup(lambda: create_ui(args,))
     global api
     api = UttaleAPI(args.uttale)
     create_ui(args)
-    ui.run(title="harken", native=False, show=False, reload=reload)
+    ui.run(title="harken", native=False, show=False, reload=reload, host=args.host)
 
 
 if __name__ in {"__main__", "__mp_main__"}:
