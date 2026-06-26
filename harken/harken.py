@@ -507,13 +507,36 @@ window.audio.play()
 return true
 """)
         state.button_record.props(f'color={"green"}')
-    def on_add_dynamic_compression(self):
-        ui.run_javascript("""
-const context = new AudioContext()
+    async def on_add_dynamic_compression(self):
+        ok = await ui.run_javascript("""
 const audioElement = document.querySelector('audio')
-const source = context.createMediaElementSource(audioElement)
-const compressor = context.createDynamicsCompressor()
+if (!audioElement) return false
 
+// Web Audio reads zeroes from a cross-origin element unless it was fetched
+// with CORS. crossOrigin must be set before the media loads, so if it isn't
+// already set we reload the source (preserving position/playback) first.
+if (audioElement.crossOrigin !== 'anonymous') {
+    const wasPlaying = !audioElement.paused
+    const position = audioElement.currentTime
+    audioElement.crossOrigin = 'anonymous'
+    audioElement.load()
+    await new Promise(resolve => {
+        audioElement.addEventListener('loadedmetadata', resolve, { once: true })
+    })
+    audioElement.currentTime = position
+    if (wasPlaying) audioElement.play()
+}
+
+// Reuse a single AudioContext / source node: createMediaElementSource
+// throws InvalidStateError if called twice on the same element.
+window.audioContext = window.audioContext || new AudioContext()
+const context = window.audioContext
+if (!window.compressorSource) {
+    window.compressorSource = context.createMediaElementSource(audioElement)
+}
+const source = window.compressorSource
+
+const compressor = context.createDynamicsCompressor()
 compressor.threshold.setValueAtTime(-50, context.currentTime) // dB
 compressor.knee.setValueAtTime(40, context.currentTime) // dB
 compressor.ratio.setValueAtTime(12, context.currentTime)
@@ -522,8 +545,16 @@ compressor.release.setValueAtTime(0.25, context.currentTime) // seconds
 
 source.connect(compressor)
 compressor.connect(context.destination)
-console.log('Dynamic compression added')
+
+// Chrome's autoplay policy starts the context suspended; without resuming
+// it the element is routed through a halted graph and stays silent.
+await context.resume()
+console.log('Dynamic compression added, context state:', context.state)
+return true
 """)
+        if not ok:
+            logging.warning("Failed to add dynamic compression")
+            return
         self.sender.props(f'color={"green"}')
         self.sender.disable()
 
