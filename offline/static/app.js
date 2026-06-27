@@ -706,7 +706,7 @@ function groupUpdatedAt(group) {
 }
 
 function fmtExportedAt(iso) {
-  try { return new Date(iso).toLocaleString(); } catch (e) { return iso; }
+  return Timeline.fmtStamp(iso);
 }
 
 async function deleteGroup(group) {
@@ -906,7 +906,7 @@ async function jumpToListen(rec) {
 }
 
 function fmtUpdated(iso) {
-  try { return new Date(iso).toLocaleString(); } catch (e) { return iso; }
+  return Timeline.fmtStamp(iso);
 }
 
 async function renderListened() {

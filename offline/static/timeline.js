@@ -23,6 +23,13 @@ const Timeline = (() => {
     return [h, m, s].map((n) => String(n).padStart(2, "0")).join(":") + "." + String(ms).padStart(3, "0");
   }
 
+  function fmtStamp(iso) {
+    const d = new Date(iso);
+    if (isNaN(d)) return iso;
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
   // segments: [{vtt, lines:[{start,end,text}]}] where start/end are VTT strings.
   function build(segments) {
     const segs = [];
@@ -70,7 +77,7 @@ const Timeline = (() => {
     return { segIndex, segLocalTime: t - (S[segIndex] ? S[segIndex].offset : 0) };
   }
 
-  return { tsToSeconds, fmt, fmtVtt, build, lineAtEpTime, segAtEpTime };
+  return { tsToSeconds, fmt, fmtVtt, fmtStamp, build, lineAtEpTime, segAtEpTime };
 })();
 
 if (typeof module !== "undefined") module.exports = Timeline;
