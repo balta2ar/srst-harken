@@ -2,95 +2,103 @@
 
 Last updated: 2026-06-27
 
-## TL;DR for next session
+## Status
 
-The global "favorites" feature is **implemented end-to-end and verified live**
-(uttale backend restarted on :7010; harken pages render and round-trip
-favorites). The design spec is `docs/specs/2026-06-27-favorites-design.md`.
+Favorites feature is **complete and verified live** across three areas:
+favorites CRUD, sorting, and Telegram export with UI "blocks". The deployed
+uttale backend on HTTPS :7010 is running current code (has sort + set_exported).
+Everything below is committed.
 
-Remaining follow-ups (none blocking):
-- Optionally pass `--favorites-db` when launching the deployed backend (it
-  currently uses the default `~/.cache/srst-uttale/favorites.db`).
-- Future iterations (not done): comment-editing UI, and the real export
-  (telegram upload) that stamps `exported_at` — the `Update` API, `comment`
-  column, and `exported_at` column/indicator already exist.
+Specs (source of truth):
+- `docs/specs/2026-06-27-favorites-design.md`
+- `docs/specs/2026-06-27-telegram-export-blocks-design.md`
 
-## What shipped
+## What exists
 
-Single-user, global favorites: mark subtitle lines, list them, jump back, mark
-them visually. Two repos:
+**uttale** (`/home/bz/share/btsync/prg/srst-uttale`, `uttale/backend/server.py`):
+- Favorites in a separate **SQLite** store (NOT the DuckDB), opened/closed per
+  request via `favorites_db()` ctx mgr; `--favorites-db` arg (default
+  `~/.cache/srst-uttale/favorites.db`). Columns: `filename, start, end, text,
+  comment, created_at, updated_at, exported_at`; PK `(filename, start)` (start =
+  VTT string).
+- Helpers `favorites_add/get/list/update/delete` + `now_iso`; `FAVORITES_SORTS`
+  map.
+- Endpoints `/uttale/Favorites`: GET (list; `?filename=` LIKE filter;
+  `?sort=created_desc|created_asc|name_asc|name_desc`, default created_desc),
+  POST (upsert), DELETE (`?filename=&start=`); `/uttale/Favorites/Update` POST
+  (`comment` optional + `set_exported` bool → stamps `exported_at=now`; 404 if
+  missing); `/uttale/Favorites/Export` POST (unused no-op stub).
+- Tests: `test_server.py::TestFavorites` (39 tests total, all pass).
 
-- **srst-uttale** (`/home/bz/share/btsync/prg/srst-uttale`, `uttale/backend/server.py`):
-  separate **SQLite** store (NOT the DuckDB), opened/closed per request via the
-  `favorites_db()` context manager; `--favorites-db` arg (default
-  `~/.cache/srst-uttale/favorites.db`); `Favorite`/`Favorites` + `FavoriteAdd`/
-  `FavoriteUpdate` models; helpers `favorites_add/get/list/update/delete` +
-  `now_iso`; endpoints `/uttale/Favorites` GET(list, `?filename=` LIKE filter)/
-  POST(upsert)/DELETE(`?filename=&start=`), `/uttale/Favorites/Update` POST
-  (comment, 404 if missing), `/uttale/Favorites/Export` POST (no-op stub
-  `{"status":"not implemented"}`). Table columns `filename, start, end, text,
-  comment, created_at, updated_at, exported_at`; PK `(filename, start)` where
-  `start` is the VTT string. Tests: `test_server.py::TestFavorites` (11 tests).
-- **srst-harken** (here, `harken/harken.py`): `Favorite` dataclass; `UttaleAPI`
-  `_send` helper (POST/DELETE+JSON via `URLRequest(method=...)`) +
-  `list_favorites/add_favorite/update_favorite/delete_favorite/export_favorites`;
-  `UiState.favorites` (dict keyed by start-time string) + `fetch_favorites`;
-  per-line star toggle button + `harken-fav` CSS marker (coexists with
-  `.active`); `b` key toggles the active line; `at` deep-link param (one-time
-  jump on load via `state.commands`, then `sync_url()` drops it); a `Favorites`
-  nav link; second page `@ui.page("/favorites")` listing all favorites with
-  per-row Delete, an Export button, and an export-status indicator, each row
-  jumping via `/?scope=<file>&at=<start>`.
+**harken** (here, `harken/harken.py`):
+- `UttaleAPI`: `_send` (POST/DELETE+JSON) + `list_favorites(filename,sort)`,
+  `add_favorite`, `update_favorite(comment=None,set_exported=False)`,
+  `delete_favorite`. (`export_favorites` stub removed.)
+- Main view: per-line star toggle + `harken-fav` CSS marker; `b` key toggles
+  active line; `UiState.favorites` dict keyed by start-string + `fetch_favorites`;
+  in-place toggle via `SubtitleLines.set_favorited` (NO full redraw, NO popups);
+  `at` deep-link param = current playing line, kept in URL, updated by
+  `play_line`→`sync_url` (cleared on scope change); `Favorites` nav link reads
+  live URL → `/favorites?from=<origin>` so Back restores it. Search inputs
+  `debounce=1000`. `SCOPE_LIMIT=100`.
+- `/favorites` page: renders **blocks** (`group_favorites_into_blocks` +
+  `FavoriteBlock`) = runs of favorited lines with adjacent line-offsets in the
+  same file (offsets fetched via `search_text` per file). One row per block:
+  combined text (space-join), jump to first line, Delete (all members), per-block
+  Send (telegram), top "Export all", sort selector (Newest/Oldest/Name A→Z/Z→A).
+- Telegram export: `export_block` reuses `get_audio` (first start→last end,
+  ±0.5s) → temp `.ogg` → `TELEGRAM_SEND_VOICE` via `run.io_bound` → stamps
+  `exported_at` per member. Caption = `FavoriteBlock.caption` = first line
+  `#<podcast> #wtf` then combined text. `podcast` = 2nd path segment
+  (`48k/<podcast>/...`). `TELEGRAM_SEND_VOICE =
+  /home/bz/rc.arch/bz/bin/telegram-send-voice`.
+
+**rc.arch** (`/home/bz/rc.arch`, `bz/bin/telegram-send-voice`): fixed a bug where
+it exited 1 on success (cleanup trap when no ogg conversion) — added `return 0`.
+
+## Open follow-ups (none blocking)
+
+- Comment-editing UI (the `Update` API + `comment` column exist; no UI yet).
+- `/favorites` does one `search_text` (~1.5s) per distinct file to get offsets —
+  known inefficiency (same as `SearchResult.offset()`); fine for now.
+- Optionally pass `--favorites-db` to the deployed backend (uses default now).
 
 ## Decisions worth remembering
 
-- Favorites live in their own SQLite DB, opened/closed per op — keep them out of
-  the global DuckDB.
-- API responses mirror `Search`/`Scopes` (`results` + `results_count`); harken
-  joins lines↔favorites by start-time string client-side.
-- Export is a wired no-op stub; `exported_at` exists for the future real export.
-- `at` deep-link: one-time jump on load, then dropped from URL.
-- `/favorites` is a separate route (fits per-session page architecture).
+- Favorites/blocks are joined/derived client-side; blocks are UI-only (no
+  backend storage). Block sort key = newest member (created sorts) / (filename,
+  first start) (name sorts).
+- exported_at stamped server-side via the extended Update (`set_exported`).
+- Telegram script outputs/converts ogg itself and sources `~/.telegram`.
 
-## Verification done
+## Env / how to verify
 
-- uttale: `make test` style — `python3 -m unittest uttale.backend.test_server -v`
-  → 32 tests pass (21 existing + 11 favorites). Also a FastAPI `TestClient`
-  exercise of every endpoint, and a **live** HTTPS round-trip against :7010
-  (add/upsert/list/filter/update/404/export/delete/404/cleanup) — all green.
-- harken: `py_compile` clean; smoke render on a spare port confirmed `/` and
-  `/favorites` return 200, the favorited line shows `harken-fav`, the
-  `/favorites` page lists a seeded favorite with comment + "not exported", and
-  `/?scope=…&at=…` returns 200. No tracebacks. Seeded test data cleaned up.
+- harken venv WORKS: `.venv/bin/python` (nicegui 2.10.1, py3.12) — use for
+  `py_compile` and smoke renders.
+- uttale has NO working venv (`.venv` is broken py3.14; no polars/webvtt). Run
+  tests via **uv** sandbox at `/tmp/opencode/uttale-test` (already created):
+  `uv venv /tmp/opencode/uttale-test --python 3.12` then `uv pip install --python
+  /tmp/opencode/uttale-test/bin/python duckdb polars uvicorn webvtt-py fastapi
+  pydantic tqdm httpx`. Then `/tmp/opencode/uttale-test/bin/python -m unittest
+  uttale.backend.test_server`. **Use uv for ALL env ops.**
+- Deployed uttale = editable uv tool importing server.py from this repo → plain
+  **restart** picks up changes. Launch: `srst-uttale-backend-api --db root.db
+  --root /mnt/wd-red-wcc4/audio/podcast/nordnorsk/ --ssl`. Runs HTTPS :7010.
+- harken also running on :8080 (don't kill). Smoke-render: temp `_smoke.py` IN
+  repo dir pointing `h.api` at https://localhost:7010, spare port 8081-8089, poll
+  for 200, kill by PID (no bare `pkill`), remove harness. NOTE favorites page is
+  slow to render (per-file search_text) — give it >10s.
+- Live favorites tests: there are **6 real user favorites** on :7010 — don't
+  disturb them; seed/delete temp favorites and verify count returns to 6.
+- Telegram sends are REAL (channel "Norsk audioclips"). Several test messages
+  ("...test/probe/verify/ignore", "TAGTEST") were sent during dev — user may
+  delete them.
 
-## Repo state (committed)
+## Recent commits
 
-- harken: favorites feature committed as `harken: favorites (per-line star,
-  /favorites page, at deep-link, URL state)`. Prior: spec `bd71874`, AGENTS/
-  SESSION `9dbdb47`, compact line spacing `725054d`, HTTPS + audio proxy
-  `dad748a`, per-session + responsive `9c914e9`, LAN bind `3136f5f`, clickable
-  scope segments `f522119`, URL persistence `be02504`, chrome audio CORS/autoplay
-  fix `4204fda`.
-- uttale: favorites backend committed as `add favorites SQLite store and
-  /uttale/Favorites endpoints` (`a388886`) + AGENTS doc (`4cee63e`). Prior: Range
-  header alias `ce89d29`, `--ssl` `817d30c`, `Vary: Origin` `f2dc545`, CORS
-  `2f0d9df`. `test_server.py` is now tracked (was never committed before).
-
-## Env / verification notes (CORRECTED)
-
-- harken venv WORKS: `/mnt/payload/share/msi/prg/srst-harken/.venv/bin/python`
-  (nicegui 2.10.1, py3.12) — use it for `py_compile` and smoke renders.
-- uttale has NO working venv: `.venv/bin/python` is a broken symlink to system
-  py3.14, and no system python has `polars`/`webvtt`, so `server.py` can't
-  import there. To run uttale tests in a sandbox, use **uv**:
-  `uv venv /tmp/opencode/uttale-test --python 3.12` then `uv pip install
-  --python /tmp/opencode/uttale-test/bin/python duckdb polars uvicorn webvtt-py
-  fastapi pydantic tqdm httpx`. (Use uv for ALL env operations.)
-- The deployed uttale backend is an **editable uv tool** (`uv tool list` shows
-  `uttale`, installed from this repo with `editable:true`) that imports
-  `server.py` directly from the repo working tree — so a plain **restart** picks
-  up changes (no reinstall). Launch seen: `srst-uttale-backend-api --db root.db
-  --root /mnt/wd-red-wcc4/audio/podcast/nordnorsk/ --ssl`.
-- Smoke-render harken: temp harness IN the repo dir (imports need repo on path),
-  spare port 8081-8085, poll for HTTP 200, kill by PID (no bare `pkill`), remove
-  the harness after.
+- uttale: `8427138` extend Update (set_exported), `7a0f30d` sort param,
+  `a388886` favorites backend, `4cee63e` AGENTS doc.
+- harken: `2624c63` telegram caption tags, `da53cff` blocks + telegram export,
+  `8284e00` export+blocks spec, `bb63a50` sort selector, `8448d82`/`fffb39d`
+  favorites + session.
+- rc.arch: `ce5e5a7c` telegram-send-voice exit-code fix.
