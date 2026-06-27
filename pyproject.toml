@@ -11,6 +11,10 @@ dependencies = [
 
 [project.scripts]
 srst-harken = "harken.harken:main"
+srst-offline = "offline.offline:main"
 
 [tool.setuptools]
-packages = ["harken"]
+packages = ["harken", "offline"]
+
+[tool.setuptools.package-data]
+offline = ["static/*"]
