@@ -157,6 +157,10 @@ async function renderCached(box) {
   }
 }
 
+async function cachedEpisodeKeys() {
+  return new Set((await DB.all("episodes")).map((e) => e.key));
+}
+
 async function search(query, box) {
   box.innerHTML = "<p><small>Searching…</small></p>";
   let data;
@@ -170,6 +174,7 @@ async function search(query, box) {
   box.innerHTML = "";
   const keys = Object.keys(groups);
   if (!keys.length) { box.innerHTML = "<p><small>No matches.</small></p>"; return; }
+  const cached = await cachedEpisodeKeys();
   // newest episode first: by date (YYYYMMDD) desc, ties by podcast name
   keys.sort((a, b) => {
     const da = a.split("/")[2] || "", db = b.split("/")[2] || "";
@@ -183,7 +188,12 @@ async function search(query, box) {
     const label = document.createElement("span");
     label.innerHTML = `${podcastOf(segs[0])} <small>${dateOf(segs[0])} · ${segs.length} seg</small>`;
     row.appendChild(label);
-    row.onclick = () => downloadEpisode(k, segs, label);
+    if (cached.has(k)) {
+      row.classList.add("downloaded");
+      row.onclick = () => openEpisode(k);
+    } else {
+      row.onclick = () => downloadEpisode(k, segs, label);
+    }
     box.appendChild(row);
   }
 }
@@ -206,6 +216,8 @@ async function downloadEpisode(key, segs, label) {
     segments: segs, cachedAt: new Date().toISOString(),
   });
   label.innerHTML = `${podcastOf(segs[0])} <small>${dateOf(segs[0])} · cached</small>`;
+  const row = label.closest(".episode");
+  if (row) row.classList.add("downloaded");
   openEpisode(key);
 }
 
