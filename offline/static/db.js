@@ -33,5 +33,15 @@ const DB = (() => {
   const del = (store, key) => tx(store, "readwrite", (s) => s.delete(key));
   const all = (store) => tx(store, "readonly", (s) => s.getAll());
 
-  return { open, put, get, del, all };
+  function reset() {
+    if (_db) { _db.close(); _db = null; }
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.deleteDatabase(NAME);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+      req.onblocked = () => resolve();
+    });
+  }
+
+  return { open, put, get, del, all, reset };
 })();

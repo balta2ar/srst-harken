@@ -9,6 +9,7 @@ const el = {
   navFind: document.getElementById("nav-find"),
   navListen: document.getElementById("nav-listen"),
   navFav: document.getElementById("nav-fav"),
+  favCount: document.getElementById("fav-count"),
   nowplaying: document.getElementById("nowplaying"),
   transport: document.getElementById("transport"),
   tPlay: document.getElementById("t-play"),
@@ -47,12 +48,28 @@ el.navFav.onclick = () => { renderFav(); showView("fav"); };
 
 async function updateStatus() {
   const favs = await DB.all("favorites");
+  const active = favs.filter((f) => f.status !== "deleted");
   const pending = favs.filter((f) => f.status !== "synced").length;
   el.status.textContent = (navigator.onLine ? "📶" : "✈️") + " " + pending;
   el.status.title = (navigator.onLine ? "online" : "offline") + ` · ${pending} pending`;
+  el.favCount.textContent = active.length;
+  el.favCount.hidden = active.length === 0;
 }
 window.addEventListener("online", () => { syncFavorites().then(updateStatus); });
 window.addEventListener("offline", updateStatus);
+
+const VTT_TS = /^\d{2}:\d{2}:\d{2}\.\d{3}$/;
+
+// One-time heal: drop favorites saved by an earlier build with a numeric start
+// (e.g. 11.3 instead of "00:00:11.300"). The backend rejected those with HTTP 422
+// so they were never stored server-side and only jammed the pending counter.
+async function migrateFavorites() {
+  for (const f of await DB.all("favorites")) {
+    if (typeof f.start !== "string" || !VTT_TS.test(f.start)) {
+      await DB.del("favorites", f.id);
+    }
+  }
+}
 
 // ---------- Find ----------
 async function renderFind() {
@@ -77,6 +94,13 @@ async function renderFind() {
   el.viewFind.appendChild(resultsHdr);
   const resultsBox = document.createElement("div");
   el.viewFind.appendChild(resultsBox);
+
+  const reset = document.createElement("button");
+  reset.className = "danger";
+  reset.textContent = "Reset local data";
+  reset.title = "Wipe cached episodes and favorites on this device (server is untouched)";
+  reset.onclick = () => resetLocal();
+  el.viewFind.appendChild(reset);
 
   let timer = null;
   input.oninput = () => {
@@ -169,6 +193,21 @@ async function downloadEpisode(key, segs, label) {
 async function deleteEpisode(ep) {
   for (const vtt of ep.segments) await DB.del("segments", vtt);
   await DB.del("episodes", ep.key);
+}
+
+async function resetLocal() {
+  if (!confirm("Wipe all cached episodes and favorites on this device? The server is not affected; synced favorites will sync back when online.")) return;
+  el.player.pause();
+  el.player.removeAttribute("src");
+  el.player.load();
+  await DB.reset();
+  tl = null;
+  audioVtt = null;
+  currentSeg = 0;
+  currentLine = -1;
+  await updateStatus();
+  renderFind();
+  showView("find");
 }
 
 // ---------- Listen ----------
@@ -525,6 +564,7 @@ function maybeBanner() {
 // ---------- Boot ----------
 (async function boot() {
   maybeBanner();
+  await migrateFavorites();
   await updateStatus();
   if (navigator.onLine) { await syncFavorites(); await updateStatus(); }
   renderFind();
