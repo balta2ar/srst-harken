@@ -88,8 +88,9 @@ it exited 1 on success (cleanup trap when no ogg conversion) — added `return 0
   repo dir pointing `h.api` at https://localhost:7010, spare port 8081-8089, poll
   for 200, kill by PID (no bare `pkill`), remove harness. NOTE favorites page is
   slow to render (per-file search_text) — give it >10s.
-- Live favorites tests: there are **6 real user favorites** on :7010 — don't
-  disturb them; seed/delete temp favorites and verify count returns to 6.
+- Live favorites tests: there are **7 real user favorites** on :7010 (was 6
+  earlier; the user added more) — don't disturb them; seed/delete temp favorites
+  and verify the count returns to its current real baseline.
 - Telegram sends are REAL (channel "Norsk audioclips"). Several test messages
   ("...test/probe/verify/ignore", "TAGTEST") were sent during dev — user may
   delete them.
@@ -125,10 +126,46 @@ self-signed cert. If step 5 fails to boot offline, trust the cert on the phone
 Automated smoke that passed at build time (no browser): all 9 shell assets 200
 with correct MIME over `--ssl`; `/api/scopes` -> 2, `/api/lines` -> 215,
 `/api/audio` -> 200 / 3.6 MB; favorite POST then DELETE round-trips and the live
-favorites count returns to 6. Browser-only behavior (SW/IndexedDB/offline reload)
-is the manual checklist above.
+favorites count returned to its baseline. Browser-only behavior (SW/IndexedDB/
+offline reload) is the manual checklist above.
+
+### srst-offline v2 — UI/playback + favorites (manual device checks)
+
+Spec `docs/specs/2026-06-27-offline-ui-favorites-design.md`, plan
+`docs/plans/2026-06-27-offline-ui-favorites.md`. Adds icon top bar, episode-
+absolute timestamps, an episode scrubber, a Favorites view, and `POST /api/export`
+(server-side telegram, reusing harken's path).
+
+Single-origin requirement: open the app via ONE stable hostname on every network
+(recommended: the Tailscale MagicDNS name, e.g.
+`https://<host>.<tailnet>.ts.net:7020`). IndexedDB is per-origin, so mixing a raw
+LAN IP and a Tailscale IP splits your cache and favorites/pending queue. A
+dismissible banner warns when opened via a raw IP.
+
+After `srst-offline --ssl`, on the phone verify:
+1. Top bar shows three icon tabs (Find/Listen/Favorites) + a ⛅/⚡ + pending chip.
+2. Find: tap a prefilled chip -> search prefills + runs; results are newest-date
+   first.
+3. Open a cached episode -> Listen: each line shows an episode-absolute timestamp
+   (H:MM:SS) subscript.
+4. Play: the active line advances and auto-scrolls as audio plays; at a segment
+   end it auto-continues into the next segment.
+5. Top transport (prev/play-pause/next + clock) stays visible when scrolled; clock
+   shows current/total episode time.
+6. Bottom scrubber: tap/drag seeks anywhere in the episode; favorited lines show as
+   yellow ticks.
+7. Favorites tab: lists your favorites; ✈ sends one to Telegram (online; server
+   runs telegram-send-voice on the home PC); "Export all (unexported)" sends the
+   rest; sent items show ✓.
+8. Offline: marking still works; export shows it needs a connection.
+
+Build-time smoke (no browser): timeline math harness passes; all 9 shell assets
+(incl. `/api.js`,`/timeline.js`) 200 over `--ssl`; `/api/export` of a throwaway
+clip returned `{"status":"sent"}` (real telegram message sent, labeled "ignore");
+real favorites left undisturbed (current baseline 7).
 
 ## Recent commits
+
 
 - uttale: `8427138` extend Update (set_exported), `7a0f30d` sort param,
   `a388886` favorites backend, `4cee63e` AGENTS doc.

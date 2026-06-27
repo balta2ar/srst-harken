@@ -1,9 +1,11 @@
-const CACHE = "srst-offline-v1";
+const CACHE = "srst-offline-v2";
 const SHELL = [
   "/",
   "/index.html",
   "/app.css",
   "/db.js",
+  "/api.js",
+  "/timeline.js",
   "/app.js",
   "/manifest.webmanifest",
   "/icon-192.png",
