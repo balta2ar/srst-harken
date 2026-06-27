@@ -9,11 +9,9 @@ const el = {
   navFind: document.getElementById("nav-find"),
   navListen: document.getElementById("nav-listen"),
   navFav: document.getElementById("nav-fav"),
-  transportTop: document.getElementById("transport-top"),
+  nowplaying: document.getElementById("nowplaying"),
   transport: document.getElementById("transport"),
-  tPrev: document.getElementById("t-prev"),
   tPlay: document.getElementById("t-play"),
-  tNext: document.getElementById("t-next"),
   clock: document.getElementById("clock"),
   scrubber: document.getElementById("scrubber"),
   scrubFill: document.getElementById("scrub-fill"),
@@ -37,7 +35,7 @@ function showView(which) {
   el.viewListen.hidden = which !== "listen";
   el.viewFav.hidden = which !== "fav";
   const listening = which === "listen";
-  el.transportTop.hidden = !listening;
+  el.nowplaying.hidden = !listening;
   el.transport.hidden = !listening;
   el.navFind.classList.toggle("active", which === "find");
   el.navListen.classList.toggle("active", which === "listen");
@@ -50,7 +48,7 @@ el.navFav.onclick = () => { renderFav(); showView("fav"); };
 async function updateStatus() {
   const favs = await DB.all("favorites");
   const pending = favs.filter((f) => f.status !== "synced").length;
-  el.status.textContent = (navigator.onLine ? "⛅" : "⚡") + pending;
+  el.status.textContent = (navigator.onLine ? "📶" : "✈️") + " " + pending;
   el.status.title = (navigator.onLine ? "online" : "offline") + ` · ${pending} pending`;
 }
 window.addEventListener("online", () => { syncFavorites().then(updateStatus); });
@@ -310,8 +308,6 @@ el.tPlay.onclick = () => {
 };
 el.player.addEventListener("play", () => { el.tPlay.textContent = "⏸"; });
 el.player.addEventListener("pause", () => { el.tPlay.textContent = "▶"; });
-el.tPrev.onclick = () => { if (currentLine > 0) playLine(currentLine - 1); };
-el.tNext.onclick = () => { if (tl && currentLine + 1 < tl.lines.length) playLine(currentLine + 1); };
 
 function scrubToEvent(ev) {
   const rect = el.scrubber.getBoundingClientRect();

@@ -22,14 +22,12 @@
         <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="m12 17.27 6.18 3.73-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
       </button>
     </nav>
+    <span id="nowplaying" hidden>
+      <button id="t-play" aria-label="Play/pause" title="Play/pause">▶</button>
+      <span id="clock">0:00:00 / 0:00:00</span>
+    </span>
     <span id="status" title=""></span>
   </header>
-  <div id="transport-top" hidden>
-    <button id="t-prev" aria-label="Previous line" title="Previous line">⏮</button>
-    <button id="t-play" aria-label="Play/pause" title="Play/pause">▶</button>
-    <button id="t-next" aria-label="Next line" title="Next line">⏭</button>
-    <span id="clock">0:00:00 / 0:00:00</span>
-  </div>
   <main>
     <section id="view-find"></section>
     <section id="view-listen" hidden>
