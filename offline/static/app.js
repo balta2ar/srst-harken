@@ -487,8 +487,8 @@ el.player.addEventListener("ended", () => {
 el.tPlay.onclick = () => {
   if (el.player.paused) el.player.play(); else el.player.pause();
 };
-el.player.addEventListener("play", () => { el.tPlay.textContent = "⏸"; });
-el.player.addEventListener("pause", () => { el.tPlay.textContent = "▶"; });
+el.player.addEventListener("play", () => { el.tPlay.textContent = "⏸"; recordListen({ force: true }); });
+el.player.addEventListener("pause", () => { el.tPlay.textContent = "▶"; recordListen({ force: true }); });
 
 el.clockNow.onclick = () => scrollToCurrent();
 el.clockTotal.onclick = () => { setAutoscroll(!autoscroll); if (autoscroll) scrollToCurrent(); };
@@ -829,8 +829,10 @@ function listenFilename() {
   return tl && tl.segments[0] ? tl.segments[0].vtt : null;
 }
 
-async function recordListen() {
-  if (!tl || el.player.paused || el.player.ended) return;
+async function recordListen(opts) {
+  const force = opts && opts.force;
+  if (!tl) return;
+  if (!force && (el.player.paused || el.player.ended)) return;
   const filename = listenFilename();
   if (!filename) return;
   const epNow = tl.segments[currentSeg].offset + el.player.currentTime;
