@@ -431,7 +431,7 @@ async function jumpToFavorite(filename, startStr) {
   await openEpisode(key);
   const idx = tl.lines.findIndex((l) => l.vtt === filename && l.startStr === startStr);
   if (idx < 0) return;
-  await seekLine(idx, { play: false });
+  await seekLine(idx, { play: true });
   const li = el.lines.querySelector(`.line[data-index="${idx}"]`);
   if (li) li.scrollIntoView({ block: "center", behavior: "smooth" });
 }
@@ -903,8 +903,11 @@ async function jumpToListen(rec) {
   const ep = await DB.get("episodes", key);
   if (!ep) { gotoFind(podcastOf(rec.filename) + " " + dateOf(rec.filename)); return; }
   await openEpisode(key);
-  await seekEp(Timeline.tsToSeconds(rec.position));
-  scrollToCurrent();
+  const epSeconds = Timeline.tsToSeconds(rec.position);
+  await seekEp(epSeconds);
+  const idx = Timeline.lineAtEpTime(tl, epSeconds);
+  const li = idx >= 0 ? el.lines.querySelector(`.line[data-index="${idx}"]`) : null;
+  if (li) li.scrollIntoView({ block: "center", behavior: "smooth" });
 }
 
 function fmtUpdated(iso) {
