@@ -7,6 +7,10 @@ const Api = (() => {
     const r = await fetch("/api/lines?scope=" + encodeURIComponent(vtt));
     return r.json();
   }
+  async function favList() {
+    const r = await fetch("/api/favorites");
+    return r.json();
+  }
   async function audioBlob(vtt) {
     const r = await fetch("/api/audio?filename=" + encodeURIComponent(vtt));
     return r.blob();
@@ -33,5 +37,5 @@ const Api = (() => {
       }),
     });
   }
-  return { scopes, lines, audioBlob, favAdd, favDel, exportFav };
+  return { scopes, lines, favList, audioBlob, favAdd, favDel, exportFav };
 })();

@@ -153,6 +153,8 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/audio":
             self._proxy_audio({
                 "filename": q.get("filename", [""])[0], "start": "", "end": ""})
+        elif parsed.path == "/api/favorites":
+            self._proxy_json("/uttale/Favorites", {"sort": "created_desc"})
         else:
             self._serve_static(parsed.path)
 
