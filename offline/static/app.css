@@ -65,5 +65,16 @@ ol#lines { list-style: none; margin: 0; padding: 0; }
 #scrub-handle { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1.5px;
   background: #0d6efd; left: 0; }
 #scrub-marks .mark { position: absolute; top: 0; bottom: 0; width: 2px; background: #f5b301; }
+#scrub-marks .topic-mark { position: absolute; top: 35%; bottom: 35%; width: 2px; margin-left: -1px; background: #20c997; }
+
+#topics { border-bottom: 1px solid #ddd; }
+#topics-head { width: 100%; text-align: left; background: #f6f6f6; border: none;
+  padding: .5rem; font-size: .85rem; color: #555; }
+#topics-caret { display: inline-block; width: .8rem; color: #999; }
+#topics-list { list-style: none; margin: 0; padding: 0; max-height: 45vh; overflow-y: auto; }
+.topic { display: flex; gap: .5rem; align-items: baseline; padding: .4rem .5rem .4rem 1.4rem;
+  border-bottom: 1px solid #f0f0f0; cursor: pointer; }
+.topic .ts { font-size: .7rem; color: #20a07a; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.topic .title { flex: 1; font-size: .9rem; }
 
 button { cursor: pointer; }

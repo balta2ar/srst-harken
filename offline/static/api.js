@@ -7,6 +7,15 @@ const Api = (() => {
     const r = await fetch("/api/lines?scope=" + encodeURIComponent(vtt));
     return r.json();
   }
+  async function topics(filename) {
+    try {
+      const r = await fetch("/api/topics?filename=" + encodeURIComponent(filename));
+      if (!r.ok) return { results: [] };
+      return r.json();
+    } catch (e) {
+      return { results: [] };
+    }
+  }
   async function favList() {
     const r = await fetch("/api/favorites");
     if (!r.ok) throw new Error("favList " + r.status);
@@ -45,5 +54,5 @@ const Api = (() => {
       body: JSON.stringify({ filename, start }),
     });
   }
-  return { scopes, lines, favList, audioBlob, favAdd, favDel, exportFav, markExported };
+  return { scopes, lines, favList, audioBlob, favAdd, favDel, exportFav, markExported, topics };
 })();

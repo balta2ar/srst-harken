@@ -20,6 +20,11 @@ const el = {
   scrubFill: document.getElementById("scrub-fill"),
   scrubHandle: document.getElementById("scrub-handle"),
   scrubMarks: document.getElementById("scrub-marks"),
+  topics: document.getElementById("topics"),
+  topicsHead: document.getElementById("topics-head"),
+  topicsCaret: document.getElementById("topics-caret"),
+  topicsCount: document.getElementById("topics-count"),
+  topicsList: document.getElementById("topics-list"),
 };
 
 const SEARCH_CHIPS = ["idioti 2026", "kontakt 2026", "saltIAran 2026", "VernaBedrift 2026", "heimelaga 2026"];
@@ -29,6 +34,7 @@ let audioVtt = null;     // which segment blob is loaded
 let currentSeg = 0;      // active segment index
 let currentLine = -1;    // active line idx
 let autoscroll = false;  // follow the playing line (toggled via the total-time tap)
+let topicsOpen = false;  // topics panel expanded (persists across episodes in-session)
 
 function episodeKeyOf(vtt) { return vtt.split("/").slice(0, 3).join("/"); }
 function podcastOf(vtt) { return vtt.split("/")[1] || vtt; }
@@ -241,8 +247,11 @@ async function openEpisode(key) {
   currentSeg = 0;
   currentLine = -1;
   setAutoscroll(false);
+  await loadTopics(ep);
   await renderLines();
+  renderTopics();
   renderMarks();
+  renderTopicMarks();
   updateClock(0);
   showView("listen");
 }
@@ -281,7 +290,7 @@ async function renderLines() {
 }
 
 function renderMarks() {
-  el.scrubMarks.innerHTML = "";
+  el.scrubMarks.querySelectorAll(".mark").forEach((n) => n.remove());
   if (!tl || !tl.total) return;
   favIds().then((set) => {
     for (const ln of tl.lines) {
@@ -294,6 +303,72 @@ function renderMarks() {
     }
   });
 }
+
+async function loadTopics(ep) {
+  let results;
+  if (navigator.onLine) {
+    try {
+      const data = await Api.topics(ep.segments[0]);
+      if (data && Array.isArray(data.results)) {
+        results = data.results;
+        ep.topics = results;
+        await DB.put("episodes", ep);
+      }
+    } catch (e) { /* fall back to cache */ }
+  }
+  if (!results) results = Array.isArray(ep.topics) ? ep.topics : [];
+  tl.topics = results.map((t) => ({
+    title: t.title, start: t.start, epStart: Timeline.tsToSeconds(t.start),
+  }));
+}
+
+function renderTopics() {
+  if (!tl || !tl.topics || !tl.topics.length) { el.topics.hidden = true; return; }
+  el.topicsCount.textContent = tl.topics.length;
+  const rows = tl.topics.map((t) => {
+    const li = document.createElement("li");
+    li.className = "topic";
+    const ts = document.createElement("span");
+    ts.className = "ts";
+    ts.textContent = Timeline.fmt(t.epStart);
+    const title = document.createElement("span");
+    title.className = "title";
+    title.textContent = t.title;
+    li.appendChild(ts);
+    li.appendChild(title);
+    li.onclick = () => seekTopic(t);
+    return li;
+  });
+  el.topicsList.replaceChildren(...rows);
+  el.topicsList.hidden = !topicsOpen;
+  el.topicsCaret.textContent = topicsOpen ? "▾" : "▸";
+  el.topicsHead.setAttribute("aria-expanded", topicsOpen ? "true" : "false");
+  el.topics.hidden = false;
+}
+
+function renderTopicMarks() {
+  el.scrubMarks.querySelectorAll(".topic-mark").forEach((n) => n.remove());
+  if (!tl || !tl.total || !tl.topics) return;
+  for (const t of tl.topics) {
+    const m = document.createElement("div");
+    m.className = "topic-mark";
+    m.style.left = (100 * t.epStart / tl.total) + "%";
+    el.scrubMarks.appendChild(m);
+  }
+}
+
+function seekTopic(t) {
+  seekEp(t.epStart);
+  setTimeout(scrollToCurrent, 0);
+}
+
+function toggleTopics() {
+  topicsOpen = !topicsOpen;
+  el.topicsList.hidden = !topicsOpen;
+  el.topicsCaret.textContent = topicsOpen ? "▾" : "▸";
+  el.topicsHead.setAttribute("aria-expanded", topicsOpen ? "true" : "false");
+}
+el.topicsHead.onclick = toggleTopics;
 
 async function loadSegment(si) {
   const seg = tl.segments[si];

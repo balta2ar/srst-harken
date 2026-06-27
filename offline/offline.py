@@ -150,6 +150,9 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/lines":
             self._proxy_json("/uttale/Search", {
                 "q": "", "scope": q.get("scope", [""])[0], "limit": 1000})
+        elif parsed.path == "/api/topics":
+            self._proxy_json("/uttale/Topics", {
+                "filename": q.get("filename", [""])[0]})
         elif parsed.path == "/api/audio":
             self._proxy_audio({
                 "filename": q.get("filename", [""])[0], "start": "", "end": ""})
