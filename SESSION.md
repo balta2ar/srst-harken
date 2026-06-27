@@ -159,6 +159,15 @@ After `srst-offline --ssl`, on the phone verify:
    rest; sent items show ✓.
 8. Offline: marking still works; export shows it needs a connection.
 
+v2.1 changes: Favorites now shows the union of local + server favorites — opening
+the tab (online) pulls `GET /api/favorites` and reconciles into IndexedDB (local
+pending/deleted win; a synced row absent from the server is removed). Verify on a
+fresh device/origin: with no local marks, the Favorites tab still lists your server
+favorites once online. Top bar is one row now: [Find][Listen][Favorites] then
+play/pause + clock (Listen view only), status chip far right showing 📶 (online) /
+✈️ (offline) + pending count. Prev/next-line buttons removed (use line taps or the
+scrubber).
+
 Build-time smoke (no browser): timeline math harness passes; all 9 shell assets
 (incl. `/api.js`,`/timeline.js`) 200 over `--ssl`; `/api/export` of a throwaway
 clip returned `{"status":"sent"}` (real telegram message sent, labeled "ignore");
