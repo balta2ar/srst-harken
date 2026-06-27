@@ -85,9 +85,89 @@ class Handler(BaseHTTPRequestHandler):
             extra["Service-Worker-Allowed"] = "/"
         self._send(200, target.read_bytes(), ctype, extra)
 
+    def _proxy_json(self, upstream_path, params):
+        url = f"{self.uttale}{upstream_path}?{urlencode(params)}"
+        try:
+            with urlopen(url, context=SSL_NOVERIFY) as r:
+                body = r.read()
+        except URLError as e:
+            logging.error("proxy error %s: %s", url, e)
+            self._send(502, b'{"error":"upstream"}', "application/json")
+            return
+        self._send(200, body, "application/json")
+
+    def _proxy_audio(self, params):
+        url = f"{self.uttale}/uttale/Audio?{urlencode(params)}"
+        try:
+            upstream = urlopen(url, context=SSL_NOVERIFY)
+        except URLError as e:
+            logging.error("audio proxy error %s: %s", url, e)
+            self._send(502, b"upstream")
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", upstream.headers.get("Content-Type", "audio/ogg"))
+        cl = upstream.headers.get("Content-Length")
+        if cl:
+            self.send_header("Content-Length", cl)
+        self.end_headers()
+        try:
+            while chunk := upstream.read(CHUNK):
+                self.wfile.write(chunk)
+        finally:
+            upstream.close()
+
     def do_GET(self):
         parsed = urlparse(self.path)
-        self._serve_static(parsed.path)
+        q = parse_qs(parsed.query)
+        if parsed.path == "/api/scopes":
+            self._proxy_json("/uttale/Scopes", {
+                "q": q.get("q", [""])[0], "limit": SCOPE_LIMIT})
+        elif parsed.path == "/api/lines":
+            self._proxy_json("/uttale/Search", {
+                "q": "", "scope": q.get("scope", [""])[0], "limit": 1000})
+        elif parsed.path == "/api/audio":
+            self._proxy_audio({
+                "filename": q.get("filename", [""])[0], "start": "", "end": ""})
+        else:
+            self._serve_static(parsed.path)
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        if parsed.path != "/api/favorite":
+            self._send(404, b"not found")
+            return
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length) if length else b"{}"
+        url = f"{self.uttale}/uttale/Favorites"
+        req = URLRequest(url, data=raw, method="POST")
+        req.add_header("Content-Type", "application/json")
+        try:
+            with urlopen(req, context=SSL_NOVERIFY) as r:
+                body = r.read()
+        except URLError as e:
+            logging.error("favorite POST error: %s", e)
+            self._send(502, b'{"error":"upstream"}', "application/json")
+            return
+        self._send(200, body, "application/json")
+
+    def do_DELETE(self):
+        parsed = urlparse(self.path)
+        if parsed.path != "/api/favorite":
+            self._send(404, b"not found")
+            return
+        q = parse_qs(parsed.query)
+        params = {"filename": q.get("filename", [""])[0],
+                  "start": q.get("start", [""])[0]}
+        url = f"{self.uttale}/uttale/Favorites?{urlencode(params)}"
+        req = URLRequest(url, method="DELETE")
+        try:
+            with urlopen(req, context=SSL_NOVERIFY) as r:
+                body = r.read()
+        except URLError as e:
+            logging.error("favorite DELETE error: %s", e)
+            self._send(502, b'{"error":"upstream"}', "application/json")
+            return
+        self._send(200, body, "application/json")
 
     def log_message(self, fmt, *args):
         logging.info("%s - %s", self.address_string(), fmt % args)
