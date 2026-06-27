@@ -119,6 +119,15 @@ class FavoriteBlock:
     def text(self) -> str:
         return " ".join(m.text for m in self.members)
     @property
+    def podcast(self) -> str:
+        # filenames look like 48k/<podcast>/<date>/.../*.vtt; podcast = 2nd segment
+        parts = self.filename.split("/")
+        return parts[1] if len(parts) > 1 else parts[0]
+    @property
+    def caption(self) -> str:
+        # first line tags the podcast and #wtf (marks new words), then the text
+        return f"#{self.podcast} #wtf\n{self.text}"
+    @property
     def comment(self) -> str:
         return " ".join(m.comment for m in self.members if m.comment)
     @property
@@ -172,7 +181,7 @@ def export_block(block: FavoriteBlock) -> tuple[bool, str]:
     tmp_path = spit_temp(f"{generate_filename_hash(block.text)}.ogg", audio)
     try:
         proc = subprocess.run(
-            [TELEGRAM_SEND_VOICE, str(tmp_path), "-m", block.text],
+            [TELEGRAM_SEND_VOICE, str(tmp_path), "-m", block.caption],
             capture_output=True, text=True,
         )
     except Exception as e:
