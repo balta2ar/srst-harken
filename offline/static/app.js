@@ -58,7 +58,7 @@ function showView(which) {
   el.navRecent.classList.toggle("active", which === "recent");
 }
 el.navFind.onclick = () => { renderFind(); showView("find"); };
-el.navListen.onclick = () => showView("listen");
+el.navListen.onclick = () => { showView("listen"); setTimeout(scrollToCurrent, 0); };
 el.navFav.onclick = () => {
   showView("fav");
   renderFav();
