@@ -2,9 +2,6 @@
 
 # ideas
 # - display part of speech, color code (especially adjectives and verbs)
-# - copy audio to clipboard (extract with ffmpeg + pyperclip/xclip)
-# - mark sentences as favorites (saved server-side)
-# - favorites view
 # - allow overwriting subtitles (in case there are errors). should be stored server-side
 # - command / script to export favorites to a telegram channel
 
@@ -20,7 +17,7 @@ import subprocess
 from bisect import bisect_left
 from collections import namedtuple
 from dataclasses import dataclass
-from json import loads
+from json import dumps, loads
 from pathlib import Path
 from time import perf_counter
 from typing import Callable, List, Optional
@@ -48,7 +45,7 @@ SSL_NOVERIFY = ssl._create_unverified_context()
 MEDIA = {".mp3", ".mp4", ".mkv", ".avi", ".webm", ".opus", ".ogg"}
 SUBS = {".vtt"}
 
-SCOPE_LIMIT = 1000
+SCOPE_LIMIT = 100
 SEARCH_LIMIT = 1000
 SubAndMedia = namedtuple("NamedPair", ["sub", "media"])
 
@@ -95,6 +92,19 @@ class SearchResult:
                 return i
         return 0
 
+@dataclass
+class Favorite:
+    filename: str
+    start: str
+    end: str = ""
+    text: str = ""
+    comment: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+    exported_at: Optional[str] = None
+    def as_sub_and_media(self) -> SubAndMedia:
+        return SubAndMedia(sub=self.filename, media=link_to_media(self.filename))
+
 class UttaleAPI:
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip("/")
@@ -121,6 +131,24 @@ class UttaleAPI:
             self.logger.error(f"API Error: {e}")
             return None
 
+    def _send(self, endpoint: str, method: str, params: Optional[dict] = None,
+              body: Optional[dict] = None) -> Optional[dict]:
+        try:
+            url = f"{self.base_url}{endpoint}"
+            if params:
+                url += "?" + urlencode(params)
+            data = dumps(body).encode() if body is not None else None
+            req = URLRequest(url, data=data, method=method)
+            if data is not None:
+                req.add_header("Content-Type", "application/json")
+            self.logger.info(f"{method} {url}")
+            with urlopen(req, context=SSL_NOVERIFY) as response:
+                payload = response.read().decode()
+                return loads(payload) if payload else {}
+        except URLError as e:
+            self.logger.error(f"API Error: {e}")
+            return None
+
     def search_scopes(self, query: str, limit: int = 1000) -> list[str]:
         result = self._make_request("/uttale/Scopes", {
             "q": query,
@@ -139,6 +167,35 @@ class UttaleAPI:
         if result and isinstance(result.get("results"), list):
             return [SearchResult(**item) for item in result["results"]]
         return []
+
+    def list_favorites(self, filename: Optional[str] = None) -> list[Favorite]:
+        params = {"filename": filename} if filename else None
+        result = self._make_request("/uttale/Favorites", params)
+        if result and isinstance(result.get("results"), list):
+            return [Favorite(**item) for item in result["results"]]
+        return []
+
+    def add_favorite(self, filename: str, start: str, end: str = "", text: str = "",
+                     comment: str = "") -> Optional[Favorite]:
+        result = self._send("/uttale/Favorites", "POST", body={
+            "filename": filename, "start": start, "end": end,
+            "text": text, "comment": comment,
+        })
+        return Favorite(**result) if result else None
+
+    def update_favorite(self, filename: str, start: str, comment: str) -> Optional[Favorite]:
+        result = self._send("/uttale/Favorites/Update", "POST", body={
+            "filename": filename, "start": start, "comment": comment,
+        })
+        return Favorite(**result) if result else None
+
+    def delete_favorite(self, filename: str, start: str) -> bool:
+        result = self._send("/uttale/Favorites", "DELETE",
+                            params={"filename": filename, "start": start})
+        return bool(result)
+
+    def export_favorites(self) -> Optional[dict]:
+        return self._send("/uttale/Favorites/Export", "POST")
 
     def get_audio(self, filename: str, start: str = "", end: str = "") -> bytes:
         url = (f"{self.base_url}/uttale/Audio?"
@@ -207,6 +264,17 @@ def overwrite_style():
 }
 .active {
     background-color: #dfffd6;
+}
+.harken-fav {
+    border-left: 3px solid #f5b301;
+    background-color: #fff8e1;
+}
+.harken-fav.active {
+    background-color: #eaf7d6;
+}
+.harken-star {
+    color: #f5b301;
+    flex: 0 0 auto;
 }
 body {
     padding-bottom: 5rem;
@@ -279,6 +347,7 @@ class SubtitleLines:
     def reset(self):
         self.lines = []
         self.starts = []
+        self.stars = []
         self.current_line = 0
         self.active_indices = set()
     def activate(self, at): # float (time in seconds) or int (index, # of the line)
@@ -304,9 +373,20 @@ class SubtitleLines:
             if 0 <= i < len(self.lines):
                 self.lines[i].classes(add="active")
 
-    def add(self, line, start):
+    def set_favorited(self, index: int, on: bool):
+        # mutate the row marker and star icon in place (no full redraw)
+        if 0 <= index < len(self.lines):
+            if on:
+                self.lines[index].classes(add="harken-fav")
+            else:
+                self.lines[index].classes(remove="harken-fav")
+        if 0 <= index < len(self.stars) and self.stars[index] is not None:
+            self.stars[index].props(f'icon={"star" if on else "star_border"}')
+
+    def add(self, line, start, star=None):
         self.lines.append(line)
         self.starts.append(start)
+        self.stars.append(star)
 
 @dataclass
 class UiState:
@@ -323,6 +403,11 @@ class UiState:
     search_scope_field: Input
     search_scope: str
     commands: list[Callable]
+    favorites: dict
+    current_at: str
+
+def fetch_favorites(scope: str) -> dict:
+    return {f.start: f for f in api.list_favorites(filename=scope)} if scope else {}
 
 def load_subtitles(scope) -> list[Subtitle]:
     return [
@@ -373,13 +458,15 @@ def main_page(request: Request):
     overwrite_style()
     scope = request.query_params.get("scope", "")
     query = request.query_params.get("text", "")
+    at = request.query_params.get("at", "")
     scopes = api.search_scopes(scope, limit=SCOPE_LIMIT)
     files = [SubAndMedia(sub=vtt, media=link_to_media(vtt)) for vtt in scopes]
-    subtitles = load_subtitles(files[0].sub) if files else []
+    current_file = files[0] if files else SubAndMedia(sub="", media="")
+    subtitles = load_subtitles(current_file.sub) if files else []
 
     state = UiState(
         files=files,
-        current_file=files[0] if files else SubAndMedia(sub="", media=""),
+        current_file=current_file,
         subtitles=subtitles,
         sub_lines=SubtitleLines(),
         player=MyPlayer(None),
@@ -391,6 +478,8 @@ def main_page(request: Request):
         search_scope_field=None,
         search_scope=scope,
         commands=[],
+        favorites=fetch_favorites(current_file.sub),
+        current_at=at,
     )
     logging.info(f"Media files: {len(files)}")
 
@@ -398,6 +487,7 @@ def main_page(request: Request):
         state.subtitles.clear()
         state.subtitles.extend(load_subtitles(file.sub))
         state.current_file = file
+        state.favorites = fetch_favorites(file.sub)
         state.commands.clear()
         at = 0.0 if offset < 0 else state.subtitles[offset].start
         state.commands.append(lambda: state.player.seek_and_play(at))
@@ -406,6 +496,8 @@ def main_page(request: Request):
     def play_line(sub: Subtitle):
         print(f"Playing line {sub.offset} at {sub.start_time}: {sub.text}")
         state.player.seek_and_play(sub.start)
+        state.current_at = sub.start_time
+        sync_url()
     def play_line_by_index(index: int):
         index = max(0, min(index, len(state.subtitles)-1))
         state.sub_lines.activate(index)
@@ -481,6 +573,23 @@ def main_page(request: Request):
             # Update current line to the start of selection for navigation continuity
             state.sub_lines.current_line = indices[0]
 
+    def toggle_favorite(index: int, sub: Subtitle):
+        scope = state.current_file.sub
+        if sub.start_time in state.favorites:
+            if api.delete_favorite(scope, sub.start_time):
+                state.favorites.pop(sub.start_time, None)
+                state.sub_lines.set_favorited(index, False)
+        else:
+            fav = api.add_favorite(scope, sub.start_time, sub.end_time, sub.text)
+            if fav:
+                state.favorites[sub.start_time] = fav
+                state.sub_lines.set_favorited(index, True)
+
+    def toggle_favorite_current():
+        i = state.sub_lines.current_line
+        if 0 <= i < len(state.subtitles):
+            toggle_favorite(i, state.subtitles[i])
+
     def on_key(ev: KeyEventArguments):
         if ev.modifiers:
             return
@@ -502,6 +611,8 @@ def main_page(request: Request):
             state.search_field.run_method("focus")
         elif ev.key == "m" and ev.action.keydown:
             copy_audio_segment()
+        elif ev.key == "b" and ev.action.keydown:
+            toggle_favorite_current()
 
     @ui.refreshable
     def redraw_scopes(scope: str = None) -> None:
@@ -538,13 +649,21 @@ def main_page(request: Request):
                 ui.html(content).classes("pl-4 hover:outline-1 hover:outline-dashed").on("click", on_click)
 
     def sync_url():
-        query = urlencode({"scope": state.search_scope, "text": state.search_query})
-        ui.run_javascript(f"history.replaceState(null, '', '?{query}')")
+        params = {"scope": state.search_scope, "text": state.search_query}
+        if state.current_at:
+            params["at"] = state.current_at
+        ui.run_javascript(f"history.replaceState(null, '', '?{urlencode(params)}')")
+
+    async def open_favorites():
+        # remember the current main-page URL so Favorites' Back link can restore it
+        origin = await ui.run_javascript("window.location.pathname + window.location.search")
+        ui.navigate.to("/favorites?" + urlencode({"from": origin}))
 
     def select_scope(scope: str):
         nonlocal state
         state.search_scope = scope
         state.search_scope_field.value = scope
+        state.current_at = ""
         sync_url()
         redraw_scopes.refresh(state.search_scope)
 
@@ -683,17 +802,19 @@ r -- Record |
 p / s -- Play |
 c -- Compress |
 k -- Focus on search field |
-m -- Copy audio segment
+m -- Copy audio segment |
+b -- Toggle favorite
 """
         with ui.row().classes("w-full flex-wrap items-center gap-1"):
             state.search_scope_field = ui.input(label="Search scope",
                                                 value=state.search_scope,
                                                 placeholder="Type something to search",
-                                                on_change=on_change_scope).classes("harken-search pl-1").tooltip(shortcuts)
+                                                on_change=on_change_scope).props("debounce=1000").classes("harken-search pl-1").tooltip(shortcuts)
             state.search_field = ui.input(label="Search by word",
                                           value=state.search_query,
                                           placeholder="Type something to search",
-                                          on_change=on_search).classes("harken-search pl-1").tooltip(shortcuts)
+                                          on_change=on_search).props("debounce=1000").classes("harken-search pl-1").tooltip(shortcuts)
+            ui.link("Favorites", "#").classes("pl-2 self-center").on("click", open_favorites)
         with ui.element("div").classes("harken-main"):
             with ui.column().classes("harken-browse border"):
                 redraw_scopes(state.search_scope)
@@ -702,9 +823,16 @@ m -- Copy audio segment
                 with ui.column().classes("w-full gap-0"):
                     state.sub_lines.reset()
                     for i, s in enumerate(state.subtitles):
-                        with ui.row().classes("harken-line w-full hover:ring-1").props(f'data-index={i}') as line_row:
+                        favorited = s.start_time in state.favorites
+                        row_classes = "harken-line w-full hover:ring-1 items-center flex-nowrap"
+                        if favorited:
+                            row_classes += " harken-fav"
+                        with ui.row().classes(row_classes).props(f'data-index={i}') as line_row:
+                            icon = "star" if favorited else "star_border"
+                            star = ui.button(icon=icon, on_click=lambda i=i, s=s: toggle_favorite(i, s)) \
+                                .props("flat round dense size=sm").classes("harken-star")
                             ui.label(f"{s.text}").on("click", lambda s=s: on_line_click(s)).classes("cursor-pointer text-lg")
-                            state.sub_lines.add(line_row, s.start)
+                            state.sub_lines.add(line_row, s.start, star)
         draw_controls()
         for c in state.commands: c()
         state.commands.clear()
@@ -723,7 +851,62 @@ m -- Copy audio segment
             state.button_record = ui.button(icon="mic", on_click=on_record_toggle).props("flat round dense").tooltip("Record")
             state.button_play = ui.button(icon="hearing", on_click=on_record_play).props("flat round dense").tooltip("Play recording")
             state.button_compress = ui.button(icon="graphic_eq", on_click=on_add_dynamic_compression).props("flat round dense").tooltip("Compress")
+
+    # `at` deep-links a specific line (start-time string); jump to it once on
+    # load. It stays in the URL as the current line (kept in sync on line plays).
+    # The command runs at the end of draw(), after sub_lines rows have been built.
+    if at:
+        for i, s in enumerate(state.subtitles):
+            if s.start_time == at:
+                state.commands.append(lambda i=i, s=s: (state.sub_lines.activate(i),
+                                                        state.player.seek_and_play(s.start)))
+                break
+        sync_url()
     draw()
+
+@ui.page("/favorites")
+def favorites_page(request: Request):
+    overwrite_style()
+    back_url = request.query_params.get("from", "/") or "/"
+
+    def jump_to(fav: Favorite):
+        ui.navigate.to("/?" + urlencode({"scope": fav.filename, "at": fav.start}))
+
+    @ui.refreshable
+    def draw_favorites():
+        favorites = api.list_favorites()
+        with ui.row().classes("w-full items-center gap-2"):
+            ui.link("< Back", back_url).classes("text-lg")
+            ui.label(f"Favorites ({len(favorites)})").classes("text-lg font-bold")
+            ui.button("Export", icon="upload", on_click=on_export).props("dense")
+        if not favorites:
+            ui.label("No favorites yet.").classes("pl-2 text-gray-500")
+            return
+        with ui.column().classes("w-full gap-0"):
+            for fav in favorites:
+                with ui.row().classes("harken-line w-full items-center flex-nowrap hover:ring-1"):
+                    ui.button(icon="delete", on_click=lambda fav=fav: on_delete(fav)) \
+                        .props("flat round dense size=sm").classes("text-red-400")
+                    with ui.column().classes("gap-0 cursor-pointer grow min-w-0") \
+                            .on("click", lambda fav=fav: jump_to(fav)):
+                        ui.label(fav.text).classes("text-lg")
+                        meta = fav.filename
+                        if fav.comment:
+                            meta += f" — {fav.comment}"
+                        ui.label(meta).classes("text-xs text-gray-500 truncate")
+                        exported = f"exported {fav.exported_at}" if fav.exported_at else "not exported"
+                        ui.label(f"{fav.created_at} · {exported}").classes("text-xs text-gray-400")
+
+    def on_delete(fav: Favorite):
+        if api.delete_favorite(fav.filename, fav.start):
+            draw_favorites.refresh()
+
+    def on_export():
+        result = api.export_favorites()
+        status = result.get("status") if result else "failed"
+        ui.notify(f"Export: {status}")
+
+    draw_favorites()
 
 def detect_lan_ip() -> Optional[str]:
     try:
