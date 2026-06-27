@@ -197,6 +197,9 @@ class Handler(BaseHTTPRequestHandler):
         start = fav.get("start", "")
         end = fav.get("end", "") or start
         text = fav.get("text", "")
+        if not filename or not start:
+            self._send(400, b'{"status":"error","detail":"missing filename/start"}', "application/json")
+            return
         ogg = str(Path(filename).with_suffix(".ogg"))
         audio_url = (f"{self.uttale}/uttale/Audio?filename={quote(ogg)}"
                      f"&start={quote(clip_ts(start, -0.5))}&end={quote(clip_ts(end, 0.5))}")

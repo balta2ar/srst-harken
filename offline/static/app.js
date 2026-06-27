@@ -177,6 +177,9 @@ async function deleteEpisode(ep) {
 async function openEpisode(key) {
   const ep = await DB.get("episodes", key);
   if (!ep) return;
+  el.player.pause();
+  el.player.removeAttribute("src");
+  el.player.load();
   const segments = [];
   for (const vtt of ep.segments) {
     const seg = await DB.get("segments", vtt);
@@ -244,7 +247,9 @@ async function loadSegment(si) {
   const seg = tl.segments[si];
   const rec = await DB.get("segments", seg.vtt);
   if (!rec) return false;
+  const prev = el.player.src;
   el.player.src = URL.createObjectURL(rec.audio);
+  if (prev && prev.startsWith("blob:")) URL.revokeObjectURL(prev);
   audioVtt = seg.vtt;
   currentSeg = si;
   return true;
@@ -310,11 +315,19 @@ el.tNext.onclick = () => { if (tl && currentLine + 1 < tl.lines.length) playLine
 
 function scrubToEvent(ev) {
   const rect = el.scrubber.getBoundingClientRect();
-  const x = (ev.touches ? ev.touches[0].clientX : ev.clientX) - rect.left;
-  const f = Math.min(1, Math.max(0, x / rect.width));
+  const cx = ev.touches ? ev.touches[0].clientX : ev.clientX;
+  const f = Math.min(1, Math.max(0, (cx - rect.left) / rect.width));
   seekEp(f * (tl ? tl.total : 0));
 }
-el.scrubber.addEventListener("click", scrubToEvent);
+let scrubbing = false;
+el.scrubber.addEventListener("pointerdown", (ev) => {
+  scrubbing = true;
+  el.scrubber.setPointerCapture(ev.pointerId);
+  scrubToEvent(ev);
+});
+el.scrubber.addEventListener("pointermove", (ev) => { if (scrubbing) scrubToEvent(ev); });
+el.scrubber.addEventListener("pointerup", () => { scrubbing = false; });
+el.scrubber.addEventListener("pointercancel", () => { scrubbing = false; });
 
 // ---------- Favorites ----------
 async function toggleFavorite(ln, star) {
