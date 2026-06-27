@@ -9,19 +9,41 @@
   <title>srst-offline</title>
 </head>
 <body>
+  <div id="banner" hidden></div>
   <header id="bar">
-    <button id="nav-find">Find</button>
-    <button id="nav-listen">Listen</button>
-    <span id="status"></span>
+    <nav id="tabs">
+      <button id="nav-find" class="tab" aria-label="Find" title="Find">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
+      </button>
+      <button id="nav-listen" class="tab" aria-label="Listen" title="Listen">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
+      </button>
+      <button id="nav-fav" class="tab" aria-label="Favorites" title="Favorites">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="m12 17.27 6.18 3.73-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+      </button>
+    </nav>
+    <span id="status" title=""></span>
   </header>
+  <div id="transport-top" hidden>
+    <button id="t-prev" aria-label="Previous line" title="Previous line">⏮</button>
+    <button id="t-play" aria-label="Play/pause" title="Play/pause">▶</button>
+    <button id="t-next" aria-label="Next line" title="Next line">⏭</button>
+    <span id="clock">0:00:00 / 0:00:00</span>
+  </div>
   <main>
     <section id="view-find"></section>
     <section id="view-listen" hidden>
-      <audio id="player" controls></audio>
       <ol id="lines"></ol>
     </section>
+    <section id="view-fav" hidden></section>
   </main>
+  <div id="transport" hidden>
+    <div id="scrubber"><div id="scrub-fill"></div><div id="scrub-handle"></div><div id="scrub-marks"></div></div>
+  </div>
+  <audio id="player"></audio>
   <script src="/db.js"></script>
+  <script src="/api.js"></script>
+  <script src="/timeline.js"></script>
   <script src="/app.js"></script>
   <script>
     if ("serviceWorker" in navigator) {
