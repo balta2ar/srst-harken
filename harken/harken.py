@@ -168,9 +168,13 @@ class UttaleAPI:
             return [SearchResult(**item) for item in result["results"]]
         return []
 
-    def list_favorites(self, filename: Optional[str] = None) -> list[Favorite]:
-        params = {"filename": filename} if filename else None
-        result = self._make_request("/uttale/Favorites", params)
+    def list_favorites(self, filename: Optional[str] = None, sort: Optional[str] = None) -> list[Favorite]:
+        params = {}
+        if filename:
+            params["filename"] = filename
+        if sort:
+            params["sort"] = sort
+        result = self._make_request("/uttale/Favorites", params or None)
         if result and isinstance(result.get("results"), list):
             return [Favorite(**item) for item in result["results"]]
         return []
@@ -868,16 +872,29 @@ b -- Toggle favorite
 def favorites_page(request: Request):
     overwrite_style()
     back_url = request.query_params.get("from", "/") or "/"
+    sort_options = {
+        "created_desc": "Newest first",
+        "created_asc": "Oldest first",
+        "name_asc": "Name A→Z",
+        "name_desc": "Name Z→A",
+    }
+    ui_sort = {"value": "created_desc"}
 
     def jump_to(fav: Favorite):
         ui.navigate.to("/?" + urlencode({"scope": fav.filename, "at": fav.start}))
 
+    def on_sort_change(e):
+        ui_sort["value"] = e.value
+        draw_favorites.refresh()
+
     @ui.refreshable
     def draw_favorites():
-        favorites = api.list_favorites()
+        favorites = api.list_favorites(sort=ui_sort["value"])
         with ui.row().classes("w-full items-center gap-2"):
             ui.link("< Back", back_url).classes("text-lg")
             ui.label(f"Favorites ({len(favorites)})").classes("text-lg font-bold")
+            ui.select(sort_options, value=ui_sort["value"], on_change=on_sort_change) \
+                .props("dense outlined").classes("w-40")
             ui.button("Export", icon="upload", on_click=on_export).props("dense")
         if not favorites:
             ui.label("No favorites yet.").classes("pl-2 text-gray-500")
