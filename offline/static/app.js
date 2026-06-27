@@ -574,9 +574,15 @@ async function _renderFav() {
     body.appendChild(t);
     body.appendChild(meta);
     const send = document.createElement("button");
-    send.title = "Send to Telegram";
-    send.textContent = "✈";
-    if (group.every((f) => f.exported_at)) { send.classList.add("exported"); send.textContent = "✓"; }
+    const exported = group.every((f) => f.exported_at);
+    if (exported) {
+      send.classList.add("exported");
+      send.textContent = "✓";
+      send.title = "Exported " + fmtExportedAt(group[0].exported_at) + " — tap to send again";
+    } else {
+      send.textContent = "✈";
+      send.title = "Send to Telegram";
+    }
     send.onclick = () => sendGroup(group, send);
     const del = document.createElement("button");
     del.title = "Delete";
@@ -593,6 +599,10 @@ async function _renderFav() {
 
 function groupUpdatedAt(group) {
   return group.reduce((m, f) => (f.updatedAt > m ? f.updatedAt : m), "");
+}
+
+function fmtExportedAt(iso) {
+  try { return new Date(iso).toLocaleString(); } catch (e) { return iso; }
 }
 
 async function deleteGroup(group) {
@@ -618,8 +628,14 @@ async function exportGroup(group) {
     const d = await r.json().catch(() => ({}));
     throw new Error(d.detail || r.status);
   }
+  // The combined send stamps only the span's start server-side; mark every member so
+  // the whole group's exported state survives the next sync/reconcile.
   const now = new Date().toISOString();
-  for (const f of group) { f.exported_at = now; await DB.put("favorites", f); }
+  for (const f of group) {
+    try { await Api.markExported(f.filename, f.start); } catch (e) { /* local mark still applied */ }
+    f.exported_at = now;
+    await DB.put("favorites", f);
+  }
 }
 
 async function sendGroup(group, btn) {
@@ -627,7 +643,7 @@ async function sendGroup(group, btn) {
   btn.textContent = "…";
   try {
     await exportGroup(group);
-    btn.textContent = "✓"; btn.classList.add("exported");
+    renderFav();
   } catch (e) { btn.textContent = "✈"; alert("Export failed: " + e.message); }
 }
 

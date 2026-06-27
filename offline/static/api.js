@@ -38,5 +38,12 @@ const Api = (() => {
       }),
     });
   }
-  return { scopes, lines, favList, audioBlob, favAdd, favDel, exportFav };
+  async function markExported(filename, start) {
+    return fetch("/api/exported", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename, start }),
+    });
+  }
+  return { scopes, lines, favList, audioBlob, favAdd, favDel, exportFav, markExported };
 })();

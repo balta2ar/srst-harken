@@ -170,13 +170,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        if parsed.path not in ("/api/favorite", "/api/export"):
+        if parsed.path not in ("/api/favorite", "/api/export", "/api/exported"):
             self._send(404, b"not found")
             return
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length) if length else b"{}"
         if parsed.path == "/api/export":
             self._export(raw)
+            return
+        if parsed.path == "/api/exported":
+            self._mark_exported_request(raw)
             return
         url = f"{self.uttale}/uttale/Favorites"
         req = URLRequest(url, data=raw, method="POST")
@@ -233,6 +236,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(502, json.dumps({"status": "error", "detail": detail}).encode(),
                        "application/json")
             return
+        self._mark_exported(filename, start)
+        self._send(200, b'{"status":"sent"}', "application/json")
+
+    def _mark_exported(self, filename, start):
         upd = URLRequest(f"{self.uttale}/uttale/Favorites/Update",
                          data=json.dumps({"filename": filename, "start": start,
                                           "set_exported": True}).encode(),
@@ -240,10 +247,25 @@ class Handler(BaseHTTPRequestHandler):
         upd.add_header("Content-Type", "application/json")
         try:
             with urlopen(upd, context=SSL_NOVERIFY):
-                pass
+                return True
         except URLError as e:
-            logging.error("export: set_exported failed: %s", e)
-        self._send(200, b'{"status":"sent"}', "application/json")
+            logging.error("set_exported failed: %s", e)
+            return False
+
+    def _mark_exported_request(self, raw):
+        try:
+            data = json.loads(raw or b"{}")
+        except ValueError:
+            self._send(400, b'{"status":"error","detail":"bad json"}', "application/json")
+            return
+        filename, start = data.get("filename", ""), data.get("start", "")
+        if not filename or not start:
+            self._send(400, b'{"status":"error","detail":"missing filename/start"}', "application/json")
+            return
+        if self._mark_exported(filename, start):
+            self._send(200, b'{"status":"ok"}', "application/json")
+        else:
+            self._send(502, b'{"status":"error","detail":"upstream"}', "application/json")
 
     def do_DELETE(self):
         parsed = urlparse(self.path)
