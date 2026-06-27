@@ -13,6 +13,16 @@ const Timeline = (() => {
     return h + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
   }
 
+  function fmtVtt(secs) {
+    secs = Math.max(0, secs || 0);
+    const whole = Math.floor(secs);
+    const ms = Math.round((secs - whole) * 1000);
+    const h = Math.floor(whole / 3600);
+    const m = Math.floor((whole % 3600) / 60);
+    const s = whole % 60;
+    return [h, m, s].map((n) => String(n).padStart(2, "0")).join(":") + "." + String(ms).padStart(3, "0");
+  }
+
   // segments: [{vtt, lines:[{start,end,text}]}] where start/end are VTT strings.
   function build(segments) {
     const segs = [];
@@ -60,7 +70,7 @@ const Timeline = (() => {
     return { segIndex, segLocalTime: t - (S[segIndex] ? S[segIndex].offset : 0) };
   }
 
-  return { tsToSeconds, fmt, build, lineAtEpTime, segAtEpTime };
+  return { tsToSeconds, fmt, fmtVtt, build, lineAtEpTime, segAtEpTime };
 })();
 
 if (typeof module !== "undefined") module.exports = Timeline;

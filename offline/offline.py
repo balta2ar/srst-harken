@@ -153,6 +153,8 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/topics":
             self._proxy_json("/uttale/Topics", {
                 "filename": q.get("filename", [""])[0]})
+        elif parsed.path == "/api/listens":
+            self._proxy_json("/uttale/Listens", {})
         elif parsed.path == "/api/audio":
             self._proxy_audio({
                 "filename": q.get("filename", [""])[0], "start": "", "end": ""})
@@ -173,7 +175,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        if parsed.path not in ("/api/favorite", "/api/export", "/api/exported"):
+        if parsed.path not in ("/api/favorite", "/api/export", "/api/exported", "/api/listens"):
             self._send(404, b"not found")
             return
         length = int(self.headers.get("Content-Length", 0))
@@ -184,6 +186,9 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/exported":
             self._mark_exported_request(raw)
             return
+        if parsed.path == "/api/listens":
+            self._proxy_post("/uttale/Listens", raw, "listen POST error")
+            return
         url = f"{self.uttale}/uttale/Favorites"
         req = URLRequest(url, data=raw, method="POST")
         req.add_header("Content-Type", "application/json")
@@ -192,6 +197,17 @@ class Handler(BaseHTTPRequestHandler):
                 body = r.read()
         except URLError as e:
             self._relay_error("favorite POST error", e)
+            return
+        self._send(200, body, "application/json")
+
+    def _proxy_post(self, upstream_path, raw, err_label):
+        req = URLRequest(f"{self.uttale}{upstream_path}", data=raw, method="POST")
+        req.add_header("Content-Type", "application/json")
+        try:
+            with urlopen(req, context=SSL_NOVERIFY) as r:
+                body = r.read()
+        except URLError as e:
+            self._relay_error(err_label, e)
             return
         self._send(200, body, "application/json")
 

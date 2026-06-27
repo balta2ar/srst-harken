@@ -54,5 +54,17 @@ const Api = (() => {
       body: JSON.stringify({ filename, start }),
     });
   }
-  return { scopes, lines, favList, audioBlob, favAdd, favDel, exportFav, markExported, topics };
+  async function listenList() {
+    const r = await fetch("/api/listens");
+    if (!r.ok) throw new Error("listenList " + r.status);
+    return r.json();
+  }
+  async function listenPut(filename, position) {
+    return fetch("/api/listens", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename, position }),
+    });
+  }
+  return { scopes, lines, favList, audioBlob, favAdd, favDel, exportFav, markExported, topics, listenList, listenPut };
 })();

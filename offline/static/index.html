@@ -22,6 +22,10 @@
         <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="m12 17.27 6.18 3.73-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
         <span id="fav-count" class="badge" hidden></span>
       </button>
+      <button id="nav-recent" class="tab" aria-label="Recent Listens" title="Recent Listens">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6a7 7 0 1 1 7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.97 8.97 0 0 0 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+        <span id="recent-count" class="badge" hidden></span>
+      </button>
     </nav>
     <span id="nowplaying" hidden>
       <button id="t-play" aria-label="Play/pause" title="Play/pause">▶</button>
@@ -39,6 +43,7 @@
       <ol id="lines"></ol>
     </section>
     <section id="view-fav" hidden></section>
+    <section id="view-recent" hidden></section>
   </main>
   <div id="transport" hidden>
     <div id="scrubber"><div id="scrub-fill"></div><div id="scrub-handle"></div><div id="scrub-marks"></div></div>

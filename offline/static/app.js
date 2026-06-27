@@ -9,7 +9,10 @@ const el = {
   navFind: document.getElementById("nav-find"),
   navListen: document.getElementById("nav-listen"),
   navFav: document.getElementById("nav-fav"),
+  navRecent: document.getElementById("nav-recent"),
   favCount: document.getElementById("fav-count"),
+  recentCount: document.getElementById("recent-count"),
+  viewRecent: document.getElementById("view-recent"),
   nowplaying: document.getElementById("nowplaying"),
   transport: document.getElementById("transport"),
   tPlay: document.getElementById("t-play"),
@@ -35,6 +38,7 @@ let currentSeg = 0;      // active segment index
 let currentLine = -1;    // active line idx
 let autoscroll = false;  // follow the playing line (toggled via the total-time tap)
 let topicsOpen = false;  // topics panel expanded (persists across episodes in-session)
+const LISTENS_LIMIT = 10;  // keep only the N most recent listens (matches server)
 
 function episodeKeyOf(vtt) { return vtt.split("/").slice(0, 3).join("/"); }
 function podcastOf(vtt) { return vtt.split("/")[1] || vtt; }
@@ -44,12 +48,14 @@ function showView(which) {
   el.viewFind.hidden = which !== "find";
   el.viewListen.hidden = which !== "listen";
   el.viewFav.hidden = which !== "fav";
+  el.viewRecent.hidden = which !== "recent";
   const listening = which === "listen";
   el.nowplaying.hidden = !listening;
   el.transport.hidden = !listening;
   el.navFind.classList.toggle("active", which === "find");
   el.navListen.classList.toggle("active", which === "listen");
   el.navFav.classList.toggle("active", which === "fav");
+  el.navRecent.classList.toggle("active", which === "recent");
 }
 el.navFind.onclick = () => { renderFind(); showView("find"); };
 el.navListen.onclick = () => showView("listen");
@@ -57,6 +63,11 @@ el.navFav.onclick = () => {
   showView("fav");
   renderFav();
   if (navigator.onLine) syncFavorites().then(renderFav);
+};
+el.navRecent.onclick = () => {
+  showView("recent");
+  renderListened();
+  if (navigator.onLine) syncListens().then(renderListened);
 };
 
 async function updateStatus() {
@@ -68,7 +79,10 @@ async function updateStatus() {
   el.favCount.textContent = active.length;
   el.favCount.hidden = active.length === 0;
 }
-window.addEventListener("online", () => { syncFavorites().then(updateStatus); });
+window.addEventListener("online", () => {
+  syncFavorites().then(updateStatus);
+  syncListens().then(refreshRecentIfActive);
+});
 window.addEventListener("offline", updateStatus);
 
 const VTT_TS = /^\d{2}:\d{2}:\d{2}\.\d{3}$/;
@@ -810,9 +824,145 @@ async function reconcileFavorites(serverByKey) {
   }
 }
 
+// ---------- Listened ----------
+function listenFilename() {
+  return tl && tl.segments[0] ? tl.segments[0].vtt : null;
+}
+
+async function recordListen() {
+  if (!tl || el.player.paused || el.player.ended) return;
+  const filename = listenFilename();
+  if (!filename) return;
+  const epNow = tl.segments[currentSeg].offset + el.player.currentTime;
+  const rec = {
+    id: filename, filename, position: Timeline.fmtVtt(epNow),
+    updated_at: new Date().toISOString(), status: "pending",
+  };
+  await DB.put("listened", rec);
+  await pruneListened();
+  updateRecentCount();
+}
+
+async function pruneListened() {
+  const rows = await DB.all("listened");
+  if (rows.length <= LISTENS_LIMIT) return;
+  rows.sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
+  for (const r of rows.slice(LISTENS_LIMIT)) await DB.del("listened", r.id);
+}
+
+async function updateRecentCount() {
+  const n = (await DB.all("listened")).length;
+  el.recentCount.textContent = n;
+  el.recentCount.hidden = n === 0;
+}
+
+async function syncListens() {
+  if (!navigator.onLine) return;
+  for (const r of await DB.all("listened")) {
+    if (r.status !== "pending") continue;
+    try {
+      const res = await Api.listenPut(r.filename, r.position);
+      if (res.ok) { r.status = "synced"; await DB.put("listened", r); }
+    } catch (e) { /* stay pending; retried later */ }
+  }
+  let data;
+  try { data = await Api.listenList(); } catch (e) { return; }
+  if (!data || !Array.isArray(data.results)) return;
+  const serverByFile = {};
+  for (const s of data.results) serverByFile[s.filename] = s;
+  await reconcileListens(serverByFile);
+}
+
+async function reconcileListens(serverByFile) {
+  const locals = await DB.all("listened");
+  const localById = {};
+  for (const r of locals) localById[r.id] = r;
+  for (const filename of Object.keys(serverByFile)) {
+    const s = serverByFile[filename];
+    const local = localById[filename];
+    if (!local) {
+      await DB.put("listened", {
+        id: filename, filename, position: s.position,
+        updated_at: s.updated_at, status: "synced",
+      });
+    } else if (s.updated_at > local.updated_at) {
+      local.position = s.position;
+      local.updated_at = s.updated_at;
+      local.status = "synced";
+      await DB.put("listened", local);
+    }
+  }
+  await pruneListened();
+  updateRecentCount();
+}
+
+async function jumpToListen(rec) {
+  const key = episodeKeyOf(rec.filename);
+  const ep = await DB.get("episodes", key);
+  if (!ep) { gotoFind(podcastOf(rec.filename) + " " + dateOf(rec.filename)); return; }
+  await openEpisode(key);
+  await seekEp(Timeline.tsToSeconds(rec.position));
+  scrollToCurrent();
+}
+
+function fmtUpdated(iso) {
+  try { return new Date(iso).toLocaleString(); } catch (e) { return iso; }
+}
+
+async function renderListened() {
+  if (renderListened._running) { renderListened._again = true; return; }
+  renderListened._running = true;
+  try {
+    do { renderListened._again = false; await _renderListened(); } while (renderListened._again);
+  } finally { renderListened._running = false; }
+}
+
+async function _renderListened() {
+  const frag = document.createDocumentFragment();
+  const rows = await DB.all("listened");
+  if (!rows.length) {
+    const p = document.createElement("p");
+    p.innerHTML = "<small>Nothing listened yet.</small>";
+    frag.appendChild(p);
+    el.viewRecent.replaceChildren(frag);
+    return;
+  }
+  rows.sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
+  for (const rec of rows) {
+    const row = document.createElement("div");
+    row.className = "listen";
+    const ts = document.createElement("span");
+    ts.className = "ts";
+    ts.textContent = Timeline.fmt(Timeline.tsToSeconds(rec.position));
+    ts.title = "Continue listening";
+    ts.onclick = () => jumpToListen(rec);
+    const body = document.createElement("div");
+    body.className = "body";
+    const pod = document.createElement("span");
+    pod.className = "link";
+    pod.textContent = podcastOf(rec.filename);
+    pod.onclick = () => gotoFind(podcastOf(rec.filename));
+    const sep = document.createTextNode(" · ");
+    const date = document.createElement("span");
+    date.className = "link";
+    date.textContent = dateOf(rec.filename);
+    date.onclick = () => gotoFind(podcastOf(rec.filename) + " " + dateOf(rec.filename));
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.innerHTML = `<span class="updated">updated ${fmtUpdated(rec.updated_at)}</span>`;
+    body.append(pod, sep, date, meta);
+    row.append(ts, body);
+    frag.appendChild(row);
+  }
+  el.viewRecent.replaceChildren(frag);
+}
+
+function refreshRecentIfActive() {
+  if (!el.viewRecent.hidden) renderListened();
+}
+
 // ---------- Banner ----------
-function maybeBanner() {
-  if (localStorage.getItem("origin-hint-dismissed")) return;
+function maybeBanner() {  if (localStorage.getItem("origin-hint-dismissed")) return;
   const h = location.hostname;
   const isIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.includes(":");
   if (!isIp) return;
@@ -829,7 +979,14 @@ function maybeBanner() {
   maybeBanner();
   await migrateFavorites();
   await updateStatus();
-  if (navigator.onLine) { await syncFavorites(); await updateStatus(); }
+  await updateRecentCount();
+  setInterval(recordListen, 5000);
+  if (navigator.onLine) {
+    await syncFavorites();
+    await updateStatus();
+    await syncListens();
+    await updateRecentCount();
+  }
   renderFind();
   showView("find");
 })();
