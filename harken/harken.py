@@ -228,6 +228,16 @@ body {
 .harken-search {
     width: 100%;
 }
+.harken-line {
+    padding-top: 0;
+    padding-bottom: 0;
+    margin: 0;
+}
+.harken-line > * {
+    line-height: 1;
+    padding-top: 0;
+    padding-bottom: 0;
+}
 @media (min-width: 768px) {
     .harken-main {
         flex-direction: row;
@@ -692,8 +702,8 @@ m -- Copy audio segment
                 with ui.column().classes("w-full gap-0"):
                     state.sub_lines.reset()
                     for i, s in enumerate(state.subtitles):
-                        with ui.row().classes("w-full hover:ring-1 py-1").props(f'data-index={i}') as line_row:
-                            ui.label(f"{s.text}").on("click", lambda s=s: on_line_click(s)).classes("cursor-pointer text-lg leading-snug")
+                        with ui.row().classes("harken-line w-full hover:ring-1").props(f'data-index={i}') as line_row:
+                            ui.label(f"{s.text}").on("click", lambda s=s: on_line_click(s)).classes("cursor-pointer text-lg")
                             state.sub_lines.add(line_row, s.start)
         draw_controls()
         for c in state.commands: c()
