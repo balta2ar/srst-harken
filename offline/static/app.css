@@ -1,0 +1,17 @@
+* { box-sizing: border-box; }
+body { font-family: system-ui, sans-serif; margin: 0; padding-bottom: 4rem; }
+#bar { position: sticky; top: 0; display: flex; gap: .5rem; align-items: center;
+  background: #fff; border-bottom: 1px solid #ddd; padding: .5rem; }
+#status { margin-left: auto; font-size: .8rem; color: #666; }
+main { padding: .5rem; }
+#search { width: 100%; padding: .5rem; font-size: 1rem; }
+.episode, .line { padding: .5rem; border-bottom: 1px solid #eee; cursor: pointer; }
+.episode small { color: #666; }
+.line { display: flex; gap: .5rem; align-items: center; }
+.line .text { flex: 1; }
+.line.active { background: #dfffd6; }
+.star { background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #f5b301; }
+button { cursor: pointer; }
+ol#lines { list-style: none; margin: 0; padding: 0; }
+#player { width: 100%; }
+.row-actions { display: flex; gap: .5rem; }
