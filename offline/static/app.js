@@ -377,6 +377,12 @@ async function renderFav() {
   hdr.appendChild(exportAll);
   el.viewFav.appendChild(hdr);
 
+  if (navigator.onLine && !renderFav._pulling) {
+    renderFav._pulling = true;
+    syncFavorites().then(() => { renderFav._pulling = false; renderFav(); })
+      .catch(() => { renderFav._pulling = false; });
+  }
+
   const favs = (await DB.all("favorites")).filter((f) => f.status !== "deleted");
   favs.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
   if (!favs.length) { el.viewFav.insertAdjacentHTML("beforeend", "<p><small>No favorites yet.</small></p>"); return; }
