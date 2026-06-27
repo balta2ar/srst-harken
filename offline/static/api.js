@@ -9,6 +9,7 @@ const Api = (() => {
   }
   async function favList() {
     const r = await fetch("/api/favorites");
+    if (!r.ok) throw new Error("favList " + r.status);
     return r.json();
   }
   async function audioBlob(vtt) {

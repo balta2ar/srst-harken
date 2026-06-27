@@ -22,12 +22,13 @@ const Timeline = (() => {
     for (let si = 0; si < segments.length; si++) {
       const segLines = segments[si].lines.map((ln) => ({
         start: tsToSeconds(ln.start), end: tsToSeconds(ln.end), text: ln.text,
+        startStr: ln.start, endStr: ln.end,
       }));
       const duration = segLines.length ? segLines[segLines.length - 1].end : 0;
       for (const ln of segLines) {
         lines.push({
           vtt: segments[si].vtt, segIndex: si,
-          start: ln.start, end: ln.end,
+          start: ln.start, end: ln.end, startStr: ln.startStr, endStr: ln.endStr,
           epStart: offset + ln.start, epEnd: offset + ln.end,
           text: ln.text, idx: idx++,
         });

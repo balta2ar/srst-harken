@@ -204,7 +204,7 @@ async function renderLines() {
   el.lines.innerHTML = "";
   const favSet = await favIds();
   tl.lines.forEach((ln) => {
-    const id = ln.vtt + "|" + ln.start;
+    const id = ln.vtt + "|" + ln.startStr;
     const li = document.createElement("li");
     li.className = "line";
     li.dataset.index = ln.idx;
@@ -231,7 +231,7 @@ function renderMarks() {
   if (!tl || !tl.total) return;
   favIds().then((set) => {
     for (const ln of tl.lines) {
-      if (set.has(ln.vtt + "|" + ln.start)) {
+      if (set.has(ln.vtt + "|" + ln.startStr)) {
         const m = document.createElement("div");
         m.className = "mark";
         m.style.left = (100 * ln.epStart / tl.total) + "%";
@@ -327,11 +327,16 @@ el.scrubber.addEventListener("pointercancel", () => { scrubbing = false; });
 
 // ---------- Favorites ----------
 async function toggleFavorite(ln, star) {
-  const id = ln.vtt + "|" + ln.start;
+  // Identity uses the VTT-string start so it matches the server (which stores
+  // start as a VTT string). tl.lines carries startStr; Favorites-view callers
+  // pass an object whose start is already the stored VTT string.
+  const startStr = ln.startStr || ln.start;
+  const endStr = ln.endStr || ln.end;
+  const id = ln.vtt + "|" + startStr;
   const existing = await DB.get("favorites", id);
   if (!existing) {
     await DB.put("favorites", {
-      id, filename: ln.vtt, start: ln.start, end: ln.end, text: ln.text,
+      id, filename: ln.vtt, start: startStr, end: endStr, text: ln.text,
       status: "pending", updatedAt: new Date().toISOString(),
     });
     if (star) star.textContent = "★";
@@ -375,8 +380,7 @@ async function renderFav() {
 
   if (navigator.onLine && !renderFav._pulling) {
     renderFav._pulling = true;
-    syncFavorites().then(() => { renderFav._pulling = false; renderFav(); })
-      .catch(() => { renderFav._pulling = false; });
+    syncFavorites().then(() => { renderFav(); }).finally(() => { renderFav._pulling = false; });
   }
 
   const favs = (await DB.all("favorites")).filter((f) => f.status !== "deleted");
@@ -462,8 +466,11 @@ async function syncFavorites() {
   // 2. pull down + reconcile the server list into IndexedDB
   let data;
   try { data = await Api.favList(); } catch (e) { return; }
+  // Only reconcile against a well-formed list; never treat a missing/malformed
+  // payload as "server has zero favorites" (that would delete the local mirror).
+  if (!data || !Array.isArray(data.results)) return;
   const serverByKey = {};
-  for (const s of (data && data.results) || []) {
+  for (const s of data.results) {
     serverByKey[s.filename + "|" + s.start] = s;
   }
   await reconcileFavorites(serverByKey);
