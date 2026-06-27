@@ -27,7 +27,7 @@ const el = {
   topicsList: document.getElementById("topics-list"),
 };
 
-const SEARCH_CHIPS = ["idioti 2026", "kontakt 2026", "saltIAran 2026", "VernaBedrift 2026", "heimelaga 2026"];
+const SEARCH_CHIPS = ["idioti 2026", "kontakt 2026", "saltIAran 2026", "VernaBedrift 2026", "heimelaga 2026", "ukesnytt 2026"];
 
 let tl = null;            // current Timeline model
 let audioVtt = null;     // which segment blob is loaded
@@ -100,6 +100,7 @@ async function renderFind(initialQuery) {
   el.viewFind.appendChild(cachedHdr);
   const cachedBox = document.createElement("div");
   el.viewFind.appendChild(cachedBox);
+  el.cachedBox = cachedBox;
   await renderCached(cachedBox);
 
   const resultsHdr = document.createElement("h3");
@@ -139,6 +140,8 @@ async function renderCached(box) {
   box.innerHTML = "";
   const eps = await DB.all("episodes");
   if (!eps.length) { box.innerHTML = "<p><small>Nothing cached yet.</small></p>"; return; }
+  eps.sort((a, b) =>
+    a.podcast !== b.podcast ? (a.podcast < b.podcast ? -1 : 1) : (a.date < b.date ? 1 : -1));
   for (const ep of eps) {
     const row = document.createElement("div");
     row.className = "episode";
@@ -218,7 +221,7 @@ async function downloadEpisode(key, segs, label) {
   label.innerHTML = `${podcastOf(segs[0])} <small>${dateOf(segs[0])} · cached</small>`;
   const row = label.closest(".episode");
   if (row) row.classList.add("downloaded");
-  openEpisode(key);
+  if (el.cachedBox) renderCached(el.cachedBox);
 }
 
 async function deleteEpisode(ep) {
