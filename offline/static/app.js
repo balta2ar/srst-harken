@@ -445,8 +445,8 @@ async function exportAllUnexported(btn) {
 
 async function syncFavorites() {
   if (!navigator.onLine) return;
-  const favs = await DB.all("favorites");
-  for (const f of favs) {
+  // 1. sync up: flush local pending/deleted to the server
+  for (const f of await DB.all("favorites")) {
     try {
       if (f.status === "pending") {
         const r = await Api.favAdd(f);
@@ -456,6 +456,46 @@ async function syncFavorites() {
         if (r.ok || r.status === 404) await DB.del("favorites", f.id);
       }
     } catch (e) { /* stay queued */ }
+  }
+  // 2. pull down + reconcile the server list into IndexedDB
+  let data;
+  try { data = await Api.favList(); } catch (e) { return; }
+  const serverByKey = {};
+  for (const s of (data && data.results) || []) {
+    serverByKey[s.filename + "|" + s.start] = s;
+  }
+  await reconcileFavorites(serverByKey);
+}
+
+// Reconcile rule: local pending/deleted win until flushed; otherwise server wins;
+// a local 'synced' row absent from the server was deleted elsewhere -> remove it.
+async function reconcileFavorites(serverByKey) {
+  const locals = await DB.all("favorites");
+  const localById = {};
+  for (const f of locals) localById[f.id] = f;
+
+  for (const key of Object.keys(serverByKey)) {
+    const s = serverByKey[key];
+    const local = localById[key];
+    if (!local) {
+      await DB.put("favorites", {
+        id: key, filename: s.filename, start: s.start, end: s.end || "",
+        text: s.text || "", status: "synced",
+        updatedAt: s.updated_at || new Date().toISOString(),
+        exported_at: s.exported_at || null,
+      });
+    } else if (local.status === "synced") {
+      local.text = s.text || "";
+      local.end = s.end || "";
+      local.exported_at = s.exported_at || null;
+      await DB.put("favorites", local);
+    }
+    // local pending/deleted: leave untouched (intent wins; flush already attempted)
+  }
+  for (const f of locals) {
+    if (f.status === "synced" && !serverByKey[f.id]) {
+      await DB.del("favorites", f.id);
+    }
   }
 }
 
