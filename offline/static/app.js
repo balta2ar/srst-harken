@@ -408,6 +408,18 @@ async function epStartForFav(f) {
 }
 
 async function renderFav() {
+  // Non-re-entrant + coalescing: renderFav is triggered from several places
+  // (tab open, background sync's .then, delete/toggle handlers) and its body
+  // awaits per-row (epStartForFav). Without this guard, two passes interleave
+  // their appends into el.viewFav and rows appear duplicated.
+  if (renderFav._running) { renderFav._again = true; return; }
+  renderFav._running = true;
+  try {
+    do { renderFav._again = false; await _renderFav(); } while (renderFav._again);
+  } finally { renderFav._running = false; }
+}
+
+async function _renderFav() {
   el.viewFav.innerHTML = "";
   const hdr = document.createElement("div");
   hdr.className = "episode";
