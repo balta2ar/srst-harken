@@ -3,13 +3,15 @@
 import argparse
 import json
 import logging
+import os
 import socket
 import ssl
 import subprocess
+import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urlparse, parse_qs
+from urllib.parse import quote, urlencode, urlparse, parse_qs
 from urllib.request import Request as URLRequest, urlopen
 
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +31,29 @@ MIME = {
 }
 
 UTTALE = "https://localhost:7010"
+TELEGRAM_SEND_VOICE = "/home/bz/rc.arch/bz/bin/telegram-send-voice"
+
+
+def parse_ts(s: str) -> float:
+    h, m, s_ms = s.split(":")
+    sec, ms = s_ms.replace(".", ",").split(",")
+    return int(h) * 3600 + int(m) * 60 + int(sec) + int(ms) / 1000.0
+
+
+def format_ts(seconds: float) -> str:
+    ms = int((seconds % 1) * 1000)
+    m, s = divmod(int(seconds), 60)
+    h, m = divmod(m, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
+
+
+def clip_ts(ts_string: str, offset_float: float) -> str:
+    return format_ts(max(0.0, parse_ts(ts_string) + offset_float))
+
+
+def podcast_of(filename: str) -> str:
+    parts = filename.split("/")
+    return parts[1] if len(parts) > 1 else parts[0]
 
 
 def detect_lan_ip():
@@ -143,11 +168,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        if parsed.path != "/api/favorite":
+        if parsed.path not in ("/api/favorite", "/api/export"):
             self._send(404, b"not found")
             return
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length) if length else b"{}"
+        if parsed.path == "/api/export":
+            self._export(raw)
+            return
         url = f"{self.uttale}/uttale/Favorites"
         req = URLRequest(url, data=raw, method="POST")
         req.add_header("Content-Type", "application/json")
@@ -158,6 +186,59 @@ class Handler(BaseHTTPRequestHandler):
             self._relay_error("favorite POST error", e)
             return
         self._send(200, body, "application/json")
+
+    def _export(self, raw):
+        try:
+            fav = json.loads(raw or b"{}")
+        except ValueError:
+            self._send(400, b'{"status":"error","detail":"bad json"}', "application/json")
+            return
+        filename = fav.get("filename", "")
+        start = fav.get("start", "")
+        end = fav.get("end", "") or start
+        text = fav.get("text", "")
+        ogg = str(Path(filename).with_suffix(".ogg"))
+        audio_url = (f"{self.uttale}/uttale/Audio?filename={quote(ogg)}"
+                     f"&start={quote(clip_ts(start, -0.5))}&end={quote(clip_ts(end, 0.5))}")
+        try:
+            with urlopen(audio_url, context=SSL_NOVERIFY) as r:
+                audio = r.read()
+        except URLError as e:
+            self._send(502, json.dumps({"status": "error", "detail": f"audio: {e}"}).encode(),
+                       "application/json")
+            return
+        caption = f"#{podcast_of(filename)} #wtf\n{text}"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as tmp:
+            tmp.write(audio)
+            tmp_path = tmp.name
+        try:
+            proc = subprocess.run([TELEGRAM_SEND_VOICE, tmp_path, "-m", caption],
+                                  capture_output=True, text=True)
+        except OSError as e:
+            self._send(500, json.dumps({"status": "error", "detail": str(e)}).encode(),
+                       "application/json")
+            return
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or "send failed").strip()
+            self._send(502, json.dumps({"status": "error", "detail": detail}).encode(),
+                       "application/json")
+            return
+        upd = URLRequest(f"{self.uttale}/uttale/Favorites/Update",
+                         data=json.dumps({"filename": filename, "start": start,
+                                          "set_exported": True}).encode(),
+                         method="POST")
+        upd.add_header("Content-Type", "application/json")
+        try:
+            with urlopen(upd, context=SSL_NOVERIFY):
+                pass
+        except URLError as e:
+            logging.error("export: set_exported failed: %s", e)
+        self._send(200, b'{"status":"sent"}', "application/json")
 
     def do_DELETE(self):
         parsed = urlparse(self.path)
