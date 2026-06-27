@@ -44,7 +44,11 @@ function showView(which) {
 }
 el.navFind.onclick = () => { renderFind(); showView("find"); };
 el.navListen.onclick = () => showView("listen");
-el.navFav.onclick = () => { renderFav(); showView("fav"); };
+el.navFav.onclick = () => {
+  showView("fav");
+  renderFav();
+  if (navigator.onLine) syncFavorites().then(renderFav);
+};
 
 async function updateStatus() {
   const favs = await DB.all("favorites");
@@ -428,11 +432,6 @@ async function _renderFav() {
   exportAll.onclick = () => exportAllUnexported(exportAll);
   hdr.appendChild(exportAll);
   el.viewFav.appendChild(hdr);
-
-  if (navigator.onLine && !renderFav._pulling) {
-    renderFav._pulling = true;
-    syncFavorites().then(() => { renderFav(); }).finally(() => { renderFav._pulling = false; });
-  }
 
   const favs = (await DB.all("favorites")).filter((f) => f.status !== "deleted");
   favs.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
