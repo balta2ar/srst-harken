@@ -94,6 +94,40 @@ it exited 1 on success (cleanup trap when no ogg conversion) — added `return 0
   ("...test/probe/verify/ignore", "TAGTEST") were sent during dev — user may
   delete them.
 
+## srst-offline — manual device verification
+
+New offline-first PWA in this repo (`offline/offline.py` + `offline/static/*`),
+separate from harken. Spec `docs/specs/2026-06-27-offline-pwa-design.md`, plan
+`docs/plans/2026-06-27-offline-pwa.md`. It is a thin stdlib HTTPS server that
+proxies uttale (`/api/scopes|lines|audio|favorite`) and serves a vanilla-JS PWA;
+audio+VTT cache in IndexedDB, favorites queue locally and auto-sync on reconnect.
+
+Run: `srst-offline --ssl` (https on :7020, proxies https://localhost:7010).
+On phone (same wifi): open `https://<home-pc-lan-ip>:7020`, accept cert, Add to
+Home Screen. Then verify:
+
+1. Find: search "MarianneMoterMennesker 20210316" -> one episode (2 seg) appears.
+2. Download: tap it -> progress -> opens listen view; episode shows under
+   "On this device".
+3. Online listen: tap lines -> audio plays, active line highlights.
+4. Star a few lines (★). Header shows "N pending".
+5. Go offline (airplane mode). Fully close + reopen the app from the home screen.
+   It still boots; the episode and lines are present; audio still plays; starring
+   still works (pending count changes).
+6. Back online. Within a moment the pending count drops to 0 (auto-sync). Confirm
+   on the server: `curl -sk https://localhost:7010/uttale/Favorites` shows the new
+   favorites; un-favoriting offline then reconnecting removes them too.
+
+Known risk: some mobile browsers refuse to register a service worker behind a
+self-signed cert. If step 5 fails to boot offline, trust the cert on the phone
+(or use a real cert) and retry.
+
+Automated smoke that passed at build time (no browser): all 9 shell assets 200
+with correct MIME over `--ssl`; `/api/scopes` -> 2, `/api/lines` -> 215,
+`/api/audio` -> 200 / 3.6 MB; favorite POST then DELETE round-trips and the live
+favorites count returns to 6. Browser-only behavior (SW/IndexedDB/offline reload)
+is the manual checklist above.
+
 ## Recent commits
 
 - uttale: `8427138` extend Update (set_exported), `7a0f30d` sort param,
@@ -101,4 +135,7 @@ it exited 1 on success (cleanup trap when no ogg conversion) — added `return 0
 - harken: `2624c63` telegram caption tags, `da53cff` blocks + telegram export,
   `8284e00` export+blocks spec, `bb63a50` sort selector, `8448d82`/`fffb39d`
   favorites + session.
+- srst-offline: `dd15c7f` server shell, `8735f49` /api proxy, `8073113` PWA
+  shell, `becbf59` IndexedDB, `8d3e9e3` View 1, `520d72e` View 2, `3cd0210`
+  packaging.
 - rc.arch: `ce5e5a7c` telegram-send-voice exit-code fix.
