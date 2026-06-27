@@ -3,7 +3,6 @@
 # ideas
 # - display part of speech, color code (especially adjectives and verbs)
 # - allow overwriting subtitles (in case there are errors). should be stored server-side
-# - command / script to export favorites to a telegram channel
 
 import argparse
 import logging
@@ -27,7 +26,7 @@ from urllib.request import Request as URLRequest, urlopen
 
 from fastapi import Header, Request, Response
 from fastapi.responses import StreamingResponse
-from nicegui import app, ui
+from nicegui import app, run, ui
 from nicegui.elements.audio import Audio
 from nicegui.elements.button import Button
 from nicegui.elements.input import Input
@@ -47,6 +46,7 @@ SUBS = {".vtt"}
 
 SCOPE_LIMIT = 100
 SEARCH_LIMIT = 1000
+TELEGRAM_SEND_VOICE = "/home/bz/rc.arch/bz/bin/telegram-send-voice"
 SubAndMedia = namedtuple("NamedPair", ["sub", "media"])
 
 def generate_filename_hash(text: str) -> str:
@@ -104,6 +104,84 @@ class Favorite:
     exported_at: Optional[str] = None
     def as_sub_and_media(self) -> SubAndMedia:
         return SubAndMedia(sub=self.filename, media=link_to_media(self.filename))
+
+@dataclass
+class FavoriteBlock:
+    filename: str
+    members: list  # list[Favorite], ordered by line offset
+    @property
+    def start(self) -> str:
+        return self.members[0].start
+    @property
+    def end(self) -> str:
+        return self.members[-1].end
+    @property
+    def text(self) -> str:
+        return " ".join(m.text for m in self.members)
+    @property
+    def comment(self) -> str:
+        return " ".join(m.comment for m in self.members if m.comment)
+    @property
+    def created_at(self) -> str:
+        # representative timestamp = newest member (for "newest first" ordering)
+        return max(m.created_at for m in self.members)
+    @property
+    def exported(self) -> bool:
+        return all(m.exported_at for m in self.members)
+    @property
+    def exported_at(self) -> Optional[str]:
+        return max((m.exported_at for m in self.members), default=None) if self.exported else None
+
+def group_favorites_into_blocks(favorites: list, sort: str = "created_desc") -> list:
+    # blocks = runs of favorited lines with adjacent line offsets in the same file
+    by_file: dict = {}
+    for fav in favorites:
+        by_file.setdefault(fav.filename, []).append(fav)
+    blocks: list = []
+    for filename, favs in by_file.items():
+        offsets = {r.start: i for i, r in enumerate(api.search_text(query="", scope=filename))}
+        favs.sort(key=lambda f: offsets.get(f.start, 1 << 30))
+        run: list = []
+        prev = None
+        for fav in favs:
+            off = offsets.get(fav.start, 1 << 30)
+            if run and prev is not None and off == prev + 1:
+                run.append(fav)
+            else:
+                if run:
+                    blocks.append(FavoriteBlock(filename, run))
+                run = [fav]
+            prev = off
+        if run:
+            blocks.append(FavoriteBlock(filename, run))
+    if sort == "created_asc":
+        blocks.sort(key=lambda b: b.created_at)
+    elif sort == "name_asc":
+        blocks.sort(key=lambda b: (b.filename, b.start))
+    elif sort == "name_desc":
+        blocks.sort(key=lambda b: (b.filename, b.start), reverse=True)
+    else:
+        blocks.sort(key=lambda b: b.created_at, reverse=True)
+    return blocks
+
+def export_block(block: FavoriteBlock) -> tuple[bool, str]:
+    audio_filename = with_extension(block.filename, ".ogg")
+    audio = api.get_audio(audio_filename, clip_ts(block.start, -0.5), clip_ts(block.end, +0.5))
+    if not audio:
+        return False, "no audio"
+    tmp_path = spit_temp(f"{generate_filename_hash(block.text)}.ogg", audio)
+    try:
+        proc = subprocess.run(
+            [TELEGRAM_SEND_VOICE, str(tmp_path), "-m", block.text],
+            capture_output=True, text=True,
+        )
+    except Exception as e:
+        return False, str(e)
+    if proc.returncode != 0:
+        return False, (proc.stderr or proc.stdout or "send failed").strip()
+    for m in block.members:
+        api.update_favorite(m.filename, m.start, set_exported=True)
+    return True, "sent"
 
 class UttaleAPI:
     def __init__(self, base_url: str):
@@ -187,19 +265,18 @@ class UttaleAPI:
         })
         return Favorite(**result) if result else None
 
-    def update_favorite(self, filename: str, start: str, comment: str) -> Optional[Favorite]:
-        result = self._send("/uttale/Favorites/Update", "POST", body={
-            "filename": filename, "start": start, "comment": comment,
-        })
+    def update_favorite(self, filename: str, start: str, comment: Optional[str] = None,
+                        set_exported: bool = False) -> Optional[Favorite]:
+        body = {"filename": filename, "start": start, "set_exported": set_exported}
+        if comment is not None:
+            body["comment"] = comment
+        result = self._send("/uttale/Favorites/Update", "POST", body=body)
         return Favorite(**result) if result else None
 
     def delete_favorite(self, filename: str, start: str) -> bool:
         result = self._send("/uttale/Favorites", "DELETE",
                             params={"filename": filename, "start": start})
         return bool(result)
-
-    def export_favorites(self) -> Optional[dict]:
-        return self._send("/uttale/Favorites/Export", "POST")
 
     def get_audio(self, filename: str, start: str = "", end: str = "") -> bytes:
         url = (f"{self.base_url}/uttale/Audio?"
@@ -880,8 +957,8 @@ def favorites_page(request: Request):
     }
     ui_sort = {"value": "created_desc"}
 
-    def jump_to(fav: Favorite):
-        ui.navigate.to("/?" + urlencode({"scope": fav.filename, "at": fav.start}))
+    def jump_to(block: FavoriteBlock):
+        ui.navigate.to("/?" + urlencode({"scope": block.filename, "at": block.start}))
 
     def on_sort_change(e):
         ui_sort["value"] = e.value
@@ -889,39 +966,56 @@ def favorites_page(request: Request):
 
     @ui.refreshable
     def draw_favorites():
-        favorites = api.list_favorites(sort=ui_sort["value"])
+        blocks = group_favorites_into_blocks(api.list_favorites(), ui_sort["value"])
         with ui.row().classes("w-full items-center gap-2"):
             ui.link("< Back", back_url).classes("text-lg")
-            ui.label(f"Favorites ({len(favorites)})").classes("text-lg font-bold")
+            ui.label(f"Favorites ({len(blocks)})").classes("text-lg font-bold")
             ui.select(sort_options, value=ui_sort["value"], on_change=on_sort_change) \
                 .props("dense outlined").classes("w-40")
-            ui.button("Export", icon="upload", on_click=on_export).props("dense")
-        if not favorites:
+            ui.button("Export all", icon="upload", on_click=on_export_all).props("dense")
+        if not blocks:
             ui.label("No favorites yet.").classes("pl-2 text-gray-500")
             return
         with ui.column().classes("w-full gap-0"):
-            for fav in favorites:
+            for block in blocks:
                 with ui.row().classes("harken-line w-full items-center flex-nowrap hover:ring-1"):
-                    ui.button(icon="delete", on_click=lambda fav=fav: on_delete(fav)) \
+                    ui.button(icon="delete", on_click=lambda block=block: on_delete(block)) \
                         .props("flat round dense size=sm").classes("text-red-400")
+                    ui.button(icon="send", on_click=lambda block=block: on_send(block)) \
+                        .props("flat round dense size=sm").classes("text-blue-500")
                     with ui.column().classes("gap-0 cursor-pointer grow min-w-0") \
-                            .on("click", lambda fav=fav: jump_to(fav)):
-                        ui.label(fav.text).classes("text-lg")
-                        meta = fav.filename
-                        if fav.comment:
-                            meta += f" — {fav.comment}"
+                            .on("click", lambda block=block: jump_to(block)):
+                        ui.label(block.text).classes("text-lg")
+                        meta = block.filename
+                        if block.comment:
+                            meta += f" — {block.comment}"
                         ui.label(meta).classes("text-xs text-gray-500 truncate")
-                        exported = f"exported {fav.exported_at}" if fav.exported_at else "not exported"
-                        ui.label(f"{fav.created_at} · {exported}").classes("text-xs text-gray-400")
+                        exported = f"exported {block.exported_at}" if block.exported else "not exported"
+                        ui.label(f"{block.created_at} · {exported}").classes("text-xs text-gray-400")
 
-    def on_delete(fav: Favorite):
-        if api.delete_favorite(fav.filename, fav.start):
+    def on_delete(block: FavoriteBlock):
+        deleted = any(api.delete_favorite(m.filename, m.start) for m in block.members)
+        if deleted:
             draw_favorites.refresh()
 
-    def on_export():
-        result = api.export_favorites()
-        status = result.get("status") if result else "failed"
-        ui.notify(f"Export: {status}")
+    async def on_send(block: FavoriteBlock):
+        ok, detail = await run.io_bound(export_block, block)
+        ui.notify("Sent to Telegram" if ok else f"Export failed: {detail}",
+                  type="positive" if ok else "negative")
+        if ok:
+            draw_favorites.refresh()
+
+    async def on_export_all():
+        blocks = group_favorites_into_blocks(api.list_favorites(), ui_sort["value"])
+        if not blocks:
+            return
+        sent = 0
+        for block in blocks:
+            ok, _ = await run.io_bound(export_block, block)
+            sent += 1 if ok else 0
+        ui.notify(f"Exported {sent}/{len(blocks)} blocks",
+                  type="positive" if sent == len(blocks) else "warning")
+        draw_favorites.refresh()
 
     draw_favorites()
 
