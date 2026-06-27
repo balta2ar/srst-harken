@@ -74,7 +74,7 @@ async function updateStatus() {
   const favs = await DB.all("favorites");
   const active = favs.filter((f) => f.status !== "deleted");
   const pending = favs.filter((f) => f.status !== "synced").length;
-  el.status.textContent = (navigator.onLine ? "📶" : "✈️") + (pending > 0 ? " " + pending : "");
+  el.status.textContent = pending > 0 ? String(pending) : "";
   el.status.title = (navigator.onLine ? "online" : "offline") + ` · ${pending} pending`;
   el.favCount.textContent = active.length;
   el.favCount.hidden = active.length === 0;
