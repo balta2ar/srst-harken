@@ -13,6 +13,8 @@ import logging
 import re
 import hashlib
 import base64
+import socket
+import ssl
 import tempfile
 import subprocess
 from bisect import bisect_left
@@ -23,11 +25,12 @@ from pathlib import Path
 from time import perf_counter
 from typing import Callable, List, Optional
 from urllib.error import URLError
-from urllib.parse import quote, urlencode, urlsplit
-from urllib.request import urlopen
+from urllib.parse import quote, urlencode
+from urllib.request import Request as URLRequest, urlopen
 
-from fastapi import Request
-from nicegui import context, ui
+from fastapi import Header, Request, Response
+from fastapi.responses import StreamingResponse
+from nicegui import app, ui
 from nicegui.elements.audio import Audio
 from nicegui.elements.button import Button
 from nicegui.elements.input import Input
@@ -37,6 +40,10 @@ from pydantic import BaseModel
 
 api = None
 logging.basicConfig(level=logging.DEBUG)
+
+# uttale may use a self-signed cert when running over HTTPS; these are
+# internal server-to-server calls to a trusted local backend, so skip verification.
+SSL_NOVERIFY = ssl._create_unverified_context()
 
 MEDIA = {".mp3", ".mp4", ".mkv", ".avi", ".webm", ".opus", ".ogg"}
 SUBS = {".vtt"}
@@ -102,7 +109,7 @@ class UttaleAPI:
             self.logger.info(url)
             start_time = perf_counter()
 
-            with urlopen(url) as response:
+            with urlopen(url, context=SSL_NOVERIFY) as response:
                 data = response.read()
                 response_time = perf_counter() - start_time
 
@@ -143,7 +150,7 @@ class UttaleAPI:
             self.logger.info(url)
             start_time = perf_counter()
 
-            with urlopen("http://" + url.split("://")[1]) as response:
+            with urlopen(url, context=SSL_NOVERIFY) as response:
                 data = response.read()
                 response_time = perf_counter() - start_time
 
@@ -218,6 +225,9 @@ body {
     width: 100%;
     height: 60vh;
 }
+.harken-search {
+    width: 100%;
+}
 @media (min-width: 768px) {
     .harken-main {
         flex-direction: row;
@@ -228,6 +238,9 @@ body {
     .harken-main > .harken-read {
         width: 66.666%;
         height: 80vh;
+    }
+    .harken-search {
+        width: 25%;
     }
 }
 """)
@@ -314,17 +327,36 @@ def load_subtitles(scope) -> list[Subtitle]:
         for i, r in enumerate(api.search_text(query="", scope=scope))
     ]
 
-def uttale_base_url() -> str:
-    request = context.client.request if context.client else None
-    if request is None:
-        return api.base_url
-    port = urlsplit(api.base_url).port
-    host = request.url.hostname
-    return f"{request.url.scheme}://{host}:{port}" if port else f"{request.url.scheme}://{host}"
+PROXY_HEADERS = ("Content-Type", "Content-Length", "Content-Range", "Accept-Ranges")
 
 def link_to_media(vtt: str) -> str:
     media_file = with_extension(vtt, ".ogg")
-    return f"{uttale_base_url()}/uttale/Audio?filename={quote(media_file)}&start=&end="
+    return f"/audio?filename={quote(media_file)}&start=&end="
+
+@app.get("/audio")
+@app.head("/audio")
+def audio_proxy(filename: str, start: str = "", end: str = "", range_header: str = Header(None, alias="Range")) -> Response:
+    url = (f"{api.base_url}/uttale/Audio?"
+           f"filename={quote(filename)}&start={quote(start)}&end={quote(end)}")
+    req = URLRequest(url)
+    if range_header:
+        req.add_header("Range", range_header)
+    upstream = urlopen(req, context=SSL_NOVERIFY)
+    headers = {k: upstream.headers[k] for k in PROXY_HEADERS if upstream.headers.get(k)}
+
+    def stream():
+        try:
+            while chunk := upstream.read(64 * 1024):
+                yield chunk
+        finally:
+            upstream.close()
+
+    return StreamingResponse(
+        stream(),
+        status_code=upstream.status,
+        headers=headers,
+        media_type=upstream.headers.get("Content-Type", "audio/ogg"),
+    )
 
 @ui.page("/")
 def main_page(request: Request):
@@ -523,6 +555,7 @@ if (window.recorder && window.recorder.state === 'recording') {
     window.recorder.stop()
     return false
 } else {
+    if (!navigator.mediaDevices) return 'insecure'
     navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
         const context = new AudioContext()
         const source = context.createMediaStreamSource(stream)
@@ -553,6 +586,9 @@ if (window.recorder && window.recorder.state === 'recording') {
     return true
 }
 """)
+        if recording == "insecure":
+            ui.notify("Recording needs HTTPS or localhost (microphone is blocked on insecure origins)", type="warning")
+            return
         state.button_record.props(f'color={"red" if recording else "green"}')
     async def on_record_play():
         state.player.pause()
@@ -643,11 +679,11 @@ m -- Copy audio segment
             state.search_scope_field = ui.input(label="Search scope",
                                                 value=state.search_scope,
                                                 placeholder="Type something to search",
-                                                on_change=on_change_scope).classes("w-full md:w-3/12 pl-1").tooltip(shortcuts)
+                                                on_change=on_change_scope).classes("harken-search pl-1").tooltip(shortcuts)
             state.search_field = ui.input(label="Search by word",
                                           value=state.search_query,
                                           placeholder="Type something to search",
-                                          on_change=on_search).classes("w-full md:w-3/12 pl-1").tooltip(shortcuts)
+                                          on_change=on_search).classes("harken-search pl-1").tooltip(shortcuts)
         with ui.element("div").classes("harken-main"):
             with ui.column().classes("harken-browse border"):
                 redraw_scopes(state.search_scope)
@@ -679,16 +715,51 @@ m -- Copy audio segment
             state.button_compress = ui.button(icon="graphic_eq", on_click=on_add_dynamic_compression).props("flat round dense").tooltip("Compress")
     draw()
 
+def detect_lan_ip() -> Optional[str]:
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except OSError:
+        return None
+
+def ensure_cert(cert_path: Path, key_path: Path) -> None:
+    if cert_path.exists() and key_path.exists():
+        return
+    cert_path.parent.mkdir(parents=True, exist_ok=True)
+    sans = ["DNS:localhost", "IP:127.0.0.1"]
+    ip = detect_lan_ip()
+    if ip:
+        sans.append(f"IP:{ip}")
+    subprocess.run([
+        "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+        "-keyout", str(key_path), "-out", str(cert_path),
+        "-days", "3650", "-subj", "/CN=harken",
+        "-addext", f"subjectAltName={','.join(sans)}",
+    ], check=True)
+    logging.info(f"Generated self-signed cert for {sans} at {cert_path}")
+
 def main(reload=False):
     parser = argparse.ArgumentParser()
     # parser.add_argument('dirs', nargs='+', help='Media directories, can be several')
-    parser.add_argument("--uttale", help="Uttale API base URL", default="http://localhost:7010")
+    parser.add_argument("--uttale", help="Uttale API base URL (defaults to http/https://localhost:7010 based on --ssl)", default=None)
     parser.add_argument("--host", help="Host/interface to bind to", default="0.0.0.0")
+    parser.add_argument("--ssl", action="store_true", help="Serve over HTTPS (self-signed cert, needed for mic access over LAN)")
+    parser.add_argument("--ssl-cert", default=str(Path.home() / ".cache/srst-harken/cert.pem"), help="TLS certificate path")
+    parser.add_argument("--ssl-key", default=str(Path.home() / ".cache/srst-harken/key.pem"), help="TLS private key path")
     args = parser.parse_args()
     logging.info(f"Args: {args}")
     global api
-    api = UttaleAPI(args.uttale)
-    ui.run(title="harken", native=False, show=False, reload=reload, host=args.host)
+    uttale = args.uttale or f"{'https' if args.ssl else 'http'}://localhost:7010"
+    api = UttaleAPI(uttale)
+    ssl_kwargs = {}
+    if args.ssl:
+        cert, key = Path(args.ssl_cert), Path(args.ssl_key)
+        ensure_cert(cert, key)
+        ssl_kwargs = {"ssl_certfile": str(cert), "ssl_keyfile": str(key)}
+    ui.run(title="harken", native=False, show=False, reload=reload, host=args.host, **ssl_kwargs)
 
 
 if __name__ in {"__main__", "__mp_main__"}:
