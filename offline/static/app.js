@@ -137,3 +137,128 @@ async function deleteEpisode(ep) {
   for (const vtt of ep.segments) await DB.del("segments", vtt);
   await DB.del("episodes", ep.key);
 }
+
+async function openEpisode(key) {
+  const ep = await DB.get("episodes", key);
+  if (!ep) return;
+  current = { episodeKey: key, lines: [] };
+  for (const vtt of ep.segments) {
+    const seg = await DB.get("segments", vtt);
+    if (!seg) continue;
+    for (const ln of seg.lines) {
+      current.lines.push({ vtt, start: ln.start, end: ln.end, text: ln.text });
+    }
+  }
+  await renderLines();
+  showView("listen");
+}
+
+function tsToSeconds(s) {
+  const [h, m, rest] = s.split(":");
+  const [sec, ms] = rest.replace(",", ".").split(".");
+  return (+h) * 3600 + (+m) * 60 + (+sec) + (ms ? +ms / 1000 : 0);
+}
+
+let audioVtt = null; // which segment blob is currently loaded in the player
+
+async function favIdsForEpisode() {
+  const favs = await DB.all("favorites");
+  const set = new Set();
+  for (const f of favs) if (f.status !== "deleted") set.add(f.id);
+  return set;
+}
+
+async function renderLines() {
+  el.lines.innerHTML = "";
+  const favSet = await favIdsForEpisode();
+  current.lines.forEach((ln, i) => {
+    const id = ln.vtt + "|" + ln.start;
+    const li = document.createElement("li");
+    li.className = "line";
+    li.dataset.index = i;
+    const star = document.createElement("button");
+    star.className = "star";
+    star.textContent = favSet.has(id) ? "★" : "☆";
+    star.onclick = (e) => { e.stopPropagation(); toggleFavorite(ln, star); };
+    const text = document.createElement("span");
+    text.className = "text";
+    text.textContent = ln.text;
+    li.appendChild(star);
+    li.appendChild(text);
+    li.onclick = () => playLine(i);
+    el.lines.appendChild(li);
+  });
+}
+
+async function playLine(i) {
+  const ln = current.lines[i];
+  if (audioVtt !== ln.vtt) {
+    const seg = await DB.get("segments", ln.vtt);
+    if (!seg) return;
+    el.player.src = URL.createObjectURL(seg.audio);
+    audioVtt = ln.vtt;
+  }
+  el.player.currentTime = tsToSeconds(ln.start);
+  el.player.play();
+  highlight(i);
+}
+
+function highlight(i) {
+  el.lines.querySelectorAll(".line.active").forEach((n) => n.classList.remove("active"));
+  const li = el.lines.querySelector(`.line[data-index="${i}"]`);
+  if (li) li.classList.add("active");
+}
+
+async function toggleFavorite(ln, star) {
+  const id = ln.vtt + "|" + ln.start;
+  const existing = await DB.get("favorites", id);
+  if (!existing) {
+    await DB.put("favorites", {
+      id, filename: ln.vtt, start: ln.start, end: ln.end, text: ln.text,
+      status: "pending", updatedAt: new Date().toISOString(),
+    });
+    star.textContent = "★";
+  } else if (existing.status === "synced") {
+    existing.status = "deleted";
+    existing.updatedAt = new Date().toISOString();
+    await DB.put("favorites", existing);
+    star.textContent = "☆";
+  } else {
+    // pending and not yet synced -> just drop it
+    await DB.del("favorites", id);
+    star.textContent = "☆";
+  }
+  updateStatus();
+  if (navigator.onLine) syncFavorites().then(updateStatus);
+}
+
+async function syncFavorites() {
+  if (!navigator.onLine) return;
+  const favs = await DB.all("favorites");
+  for (const f of favs) {
+    try {
+      if (f.status === "pending") {
+        const r = await fetch("/api/favorite", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: f.filename, start: f.start, end: f.end, text: f.text,
+          }),
+        });
+        if (r.ok) { f.status = "synced"; await DB.put("favorites", f); }
+      } else if (f.status === "deleted") {
+        const r = await fetch(
+          "/api/favorite?filename=" + encodeURIComponent(f.filename) +
+          "&start=" + encodeURIComponent(f.start), { method: "DELETE" });
+        if (r.ok) await DB.del("favorites", f.id);
+      }
+    } catch (e) { /* stay queued for next attempt */ }
+  }
+}
+
+(async function boot() {
+  await updateStatus();
+  if (navigator.onLine) { await syncFavorites(); await updateStatus(); }
+  renderFind();
+  showView("find");
+})();
