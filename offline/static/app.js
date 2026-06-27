@@ -411,6 +411,61 @@ async function epStartForFav(f) {
   return Timeline.fmt(hit ? hit.epStart : Timeline.tsToSeconds(f.start));
 }
 
+// Map (filename, start) -> line index within the file. Line order comes from the
+// cached episode segments, else a one-shot /api/lines fetch when online. Returns a
+// per-render memoized resolver; favorites whose file order is unknown get undefined
+// (and therefore render ungrouped).
+async function buildLineIndexResolver(filenames) {
+  const byFileStart = {};
+  for (const filename of filenames) {
+    let starts = null;
+    const ep = await DB.get("episodes", episodeKeyOf(filename));
+    if (ep) {
+      const seg = await DB.get("segments", filename);
+      if (seg) starts = seg.lines.map((l) => l.start);
+    }
+    if (!starts && navigator.onLine) {
+      try {
+        const data = await Api.lines(filename);
+        if (data && Array.isArray(data.results)) starts = data.results.map((l) => l.start);
+      } catch (e) { /* leave unknown */ }
+    }
+    if (starts) starts.forEach((s, i) => { byFileStart[filename + "|" + s] = i; });
+  }
+  return (f) => {
+    const k = f.filename + "|" + f.start;
+    return Object.prototype.hasOwnProperty.call(byFileStart, k) ? byFileStart[k] : undefined;
+  };
+}
+
+function tsSeconds(s) {
+  const p = String(s).split(":");
+  if (p.length !== 3) return NaN;
+  return (+p[0]) * 3600 + (+p[1]) * 60 + parseFloat(p[2]);
+}
+
+// Pure: collapse favorites that occupy consecutive line indices in the same file into
+// ordered groups. indexOf(f) -> line index or undefined. Favorites with unknown index,
+// or non-adjacent indices, or in different files, end up in separate groups.
+function groupFavorites(favs, indexOf) {
+  const byFile = {};
+  for (const f of favs) (byFile[f.filename] = byFile[f.filename] || []).push(f);
+  const groups = [];
+  for (const filename of Object.keys(byFile)) {
+    const items = byFile[filename]
+      .map((f) => ({ f, idx: indexOf(f) }))
+      .sort((a, b) => tsSeconds(a.f.start) - tsSeconds(b.f.start));
+    let cur = null, prevIdx = null;
+    for (const { f, idx } of items) {
+      const adjacent = cur && idx !== undefined && prevIdx !== undefined && idx === prevIdx + 1;
+      if (adjacent) { cur.push(f); } else { cur = [f]; groups.push(cur); }
+      prevIdx = idx;
+    }
+  }
+  return groups;
+}
+
+
 async function renderFav() {
   // Non-re-entrant + coalescing: renderFav is triggered from several places
   // (tab open, background sync's .then, delete/toggle handlers) and its body
@@ -424,76 +479,110 @@ async function renderFav() {
 }
 
 async function _renderFav() {
-  el.viewFav.innerHTML = "";
+  const frag = document.createDocumentFragment();
   const hdr = document.createElement("div");
   hdr.className = "episode";
   const exportAll = document.createElement("button");
   exportAll.textContent = "Export all (unexported)";
   exportAll.onclick = () => exportAllUnexported(exportAll);
   hdr.appendChild(exportAll);
-  el.viewFav.appendChild(hdr);
+  frag.appendChild(hdr);
 
   const favs = (await DB.all("favorites")).filter((f) => f.status !== "deleted");
-  favs.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
-  if (!favs.length) { el.viewFav.insertAdjacentHTML("beforeend", "<p><small>No favorites yet.</small></p>"); return; }
-  for (const f of favs) {
+  if (!favs.length) {
+    frag.appendChild(document.createRange().createContextualFragment("<p><small>No favorites yet.</small></p>"));
+    el.viewFav.replaceChildren(frag);
+    return;
+  }
+  const files = [...new Set(favs.map((f) => f.filename))];
+  const indexOf = await buildLineIndexResolver(files);
+  const groups = groupFavorites(favs, indexOf);
+  // Most-recently-touched group first (by max member updatedAt).
+  groups.sort((a, b) => groupUpdatedAt(b) < groupUpdatedAt(a) ? -1 : 1);
+
+  for (const group of groups) {
     const row = document.createElement("div");
     row.className = "fav";
     const ts = document.createElement("span");
     ts.className = "ts";
-    ts.textContent = await epStartForFav(f);
+    ts.textContent = await epStartForFav(group[0]);
     const body = document.createElement("div");
     body.className = "text";
     const t = document.createElement("div");
-    t.textContent = f.text;
+    t.textContent = group.map((f) => f.text).join(" ");
     const meta = document.createElement("div");
     meta.className = "meta";
-    meta.textContent = `${podcastOf(f.filename)} · ${dateOf(f.filename)}`;
+    const more = group.length > 1 ? ` · ${group.length} lines` : "";
+    meta.textContent = `${podcastOf(group[0].filename)} · ${dateOf(group[0].filename)}${more}`;
     body.appendChild(t);
     body.appendChild(meta);
     const send = document.createElement("button");
     send.title = "Send to Telegram";
     send.textContent = "✈";
-    if (f.exported_at) { send.classList.add("exported"); send.textContent = "✓"; }
-    send.onclick = () => sendFav(f, send);
+    if (group.every((f) => f.exported_at)) { send.classList.add("exported"); send.textContent = "✓"; }
+    send.onclick = () => sendGroup(group, send);
     const del = document.createElement("button");
     del.title = "Delete";
     del.textContent = "🗑";
-    del.onclick = async () => { await toggleFavorite({ vtt: f.filename, start: f.start, end: f.end, text: f.text }, null); renderFav(); };
+    del.onclick = () => deleteGroup(group);
     row.appendChild(ts);
     row.appendChild(body);
     row.appendChild(send);
     row.appendChild(del);
-    el.viewFav.appendChild(row);
+    frag.appendChild(row);
   }
+  el.viewFav.replaceChildren(frag);
 }
 
-async function sendFav(f, btn) {
+function groupUpdatedAt(group) {
+  return group.reduce((m, f) => (f.updatedAt > m ? f.updatedAt : m), "");
+}
+
+async function deleteGroup(group) {
+  for (const f of group) {
+    await toggleFavorite({ vtt: f.filename, start: f.start, end: f.end, text: f.text }, null);
+  }
+  renderFav();
+}
+
+
+// Send one combined clip for a group: audio spans the first member's start to the
+// last member's end, caption is the members' texts joined. The backend stamps
+// set_exported on the span's start; mark the remaining members exported locally so
+// the group shows fully-exported and the state syncs.
+async function exportGroup(group) {
+  const first = group[0], last = group[group.length - 1];
+  const payload = {
+    filename: first.filename, start: first.start, end: last.end || last.start,
+    text: group.map((f) => f.text).join(" "),
+  };
+  const r = await Api.exportFav(payload);
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    throw new Error(d.detail || r.status);
+  }
+  const now = new Date().toISOString();
+  for (const f of group) { f.exported_at = now; await DB.put("favorites", f); }
+}
+
+async function sendGroup(group, btn) {
   if (!navigator.onLine) { btn.textContent = "off"; setTimeout(() => (btn.textContent = "✈"), 1000); return; }
   btn.textContent = "…";
   try {
-    const r = await Api.exportFav(f);
-    if (r.ok) {
-      f.exported_at = new Date().toISOString();
-      await DB.put("favorites", f);
-      btn.textContent = "✓"; btn.classList.add("exported");
-    } else {
-      const d = await r.json().catch(() => ({}));
-      btn.textContent = "✈"; alert("Export failed: " + (d.detail || r.status));
-    }
-  } catch (e) { btn.textContent = "✈"; alert("Export failed: " + e); }
+    await exportGroup(group);
+    btn.textContent = "✓"; btn.classList.add("exported");
+  } catch (e) { btn.textContent = "✈"; alert("Export failed: " + e.message); }
 }
 
 async function exportAllUnexported(btn) {
   if (!navigator.onLine) { alert("Need a connection to export."); return; }
-  const favs = (await DB.all("favorites")).filter((f) => f.status !== "deleted" && !f.exported_at);
+  const favs = (await DB.all("favorites")).filter((f) => f.status !== "deleted");
+  const indexOf = await buildLineIndexResolver([...new Set(favs.map((f) => f.filename))]);
+  const pending = groupFavorites(favs, indexOf).filter((g) => g.some((f) => !f.exported_at));
   let sent = 0;
-  for (const f of favs) {
-    btn.textContent = `sending ${sent}/${favs.length}…`;
-    try {
-      const r = await Api.exportFav(f);
-      if (r.ok) { f.exported_at = new Date().toISOString(); await DB.put("favorites", f); sent += 1; }
-    } catch (e) { /* skip */ }
+  for (const group of pending) {
+    btn.textContent = `sending ${sent}/${pending.length}…`;
+    try { await exportGroup(group); sent += 1; } catch (e) { /* skip */ }
   }
   btn.textContent = "Export all (unexported)";
   renderFav();
