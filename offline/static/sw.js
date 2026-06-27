@@ -1,4 +1,4 @@
-const CACHE = "srst-offline-v2";
+const CACHE = "srst-offline-v3";
 const SHELL = [
   "/",
   "/index.html",
@@ -28,7 +28,20 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   // /api/* is online-only: never cache, never serve from cache.
   if (url.pathname.startsWith("/api/")) return;
+  if (e.request.method !== "GET") return;
+  // Stale-while-revalidate: serve cache instantly, refresh it in the background
+  // so the next load picks up new shell code without a manual cache-version bump.
   e.respondWith(
-    caches.match(e.request).then((hit) => hit || fetch(e.request))
+    caches.open(CACHE).then((cache) =>
+      cache.match(e.request).then((hit) => {
+        const fetching = fetch(e.request)
+          .then((res) => {
+            if (res && res.ok && res.type === "basic") cache.put(e.request, res.clone());
+            return res;
+          })
+          .catch(() => hit);
+        return hit || fetching;
+      })
+    )
   );
 });
