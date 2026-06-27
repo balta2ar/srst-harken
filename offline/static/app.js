@@ -14,6 +14,8 @@ const el = {
   transport: document.getElementById("transport"),
   tPlay: document.getElementById("t-play"),
   clock: document.getElementById("clock"),
+  clockNow: document.getElementById("clock-now"),
+  clockTotal: document.getElementById("clock-total"),
   scrubber: document.getElementById("scrubber"),
   scrubFill: document.getElementById("scrub-fill"),
   scrubHandle: document.getElementById("scrub-handle"),
@@ -26,6 +28,7 @@ let tl = null;            // current Timeline model
 let audioVtt = null;     // which segment blob is loaded
 let currentSeg = 0;      // active segment index
 let currentLine = -1;    // active line idx
+let autoscroll = false;  // follow the playing line (toggled via the total-time tap)
 
 function episodeKeyOf(vtt) { return vtt.split("/").slice(0, 3).join("/"); }
 function podcastOf(vtt) { return vtt.split("/")[1] || vtt; }
@@ -209,6 +212,7 @@ async function resetLocal() {
   audioVtt = null;
   currentSeg = 0;
   currentLine = -1;
+  setAutoscroll(false);
   await updateStatus();
   renderFind();
   showView("find");
@@ -230,6 +234,7 @@ async function openEpisode(key) {
   audioVtt = null;
   currentSeg = 0;
   currentLine = -1;
+  setAutoscroll(false);
   await renderLines();
   renderMarks();
   updateClock(0);
@@ -318,12 +323,18 @@ function setActive(idx) {
   if (idx === currentLine) return;
   el.lines.querySelectorAll(".line.active").forEach((n) => n.classList.remove("active"));
   const li = el.lines.querySelector(`.line[data-index="${idx}"]`);
-  if (li) { li.classList.add("active"); li.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
+  if (li) { li.classList.add("active"); if (autoscroll) li.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
   currentLine = idx;
 }
 
+function scrollToCurrent() {
+  const li = el.lines.querySelector(".line.active");
+  if (li) li.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
 function updateClock(epNow) {
-  el.clock.textContent = Timeline.fmt(epNow) + " / " + Timeline.fmt(tl ? tl.total : 0);
+  el.clockNow.textContent = Timeline.fmt(epNow);
+  el.clockTotal.textContent = Timeline.fmt(tl ? tl.total : 0);
   if (tl && tl.total) {
     const pct = (100 * epNow / tl.total) + "%";
     el.scrubFill.style.width = pct;
@@ -351,6 +362,14 @@ el.tPlay.onclick = () => {
 };
 el.player.addEventListener("play", () => { el.tPlay.textContent = "⏸"; });
 el.player.addEventListener("pause", () => { el.tPlay.textContent = "▶"; });
+
+el.clockNow.onclick = () => scrollToCurrent();
+el.clockTotal.onclick = () => { setAutoscroll(!autoscroll); if (autoscroll) scrollToCurrent(); };
+
+function setAutoscroll(on) {
+  autoscroll = on;
+  el.clockTotal.classList.toggle("autoscroll-on", on);
+}
 
 function scrubToEvent(ev) {
   const rect = el.scrubber.getBoundingClientRect();
