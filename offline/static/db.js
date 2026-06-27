@@ -23,7 +23,7 @@ const DB = (() => {
       const t = db.transaction(store, mode);
       const s = t.objectStore(store);
       const out = fn(s);
-      t.oncomplete = () => resolve(out && out.result !== undefined ? out.result : out);
+      t.oncomplete = () => resolve(out instanceof IDBRequest ? out.result : out);
       t.onerror = () => reject(t.error);
     }));
   }

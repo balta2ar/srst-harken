@@ -250,7 +250,8 @@ async function syncFavorites() {
         const r = await fetch(
           "/api/favorite?filename=" + encodeURIComponent(f.filename) +
           "&start=" + encodeURIComponent(f.start), { method: "DELETE" });
-        if (r.ok) await DB.del("favorites", f.id);
+        // 404 = already gone upstream; treat as done so it stops requeuing.
+        if (r.ok || r.status === 404) await DB.del("favorites", f.id);
       }
     } catch (e) { /* stay queued for next attempt */ }
   }

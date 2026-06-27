@@ -8,7 +8,7 @@ import ssl
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse, parse_qs
 from urllib.request import Request as URLRequest, urlopen
 
@@ -131,6 +131,16 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._serve_static(parsed.path)
 
+    def _relay_error(self, where, e):
+        # HTTPError carries the upstream response (e.g. 404 on a missing
+        # favorite); relay its real status so the client can act on it. A bare
+        # URLError means the backend was unreachable -> 502.
+        if isinstance(e, HTTPError):
+            self._send(e.code, e.read() or b"", "application/json")
+        else:
+            logging.error("%s: %s", where, e)
+            self._send(502, b'{"error":"upstream"}', "application/json")
+
     def do_POST(self):
         parsed = urlparse(self.path)
         if parsed.path != "/api/favorite":
@@ -145,8 +155,7 @@ class Handler(BaseHTTPRequestHandler):
             with urlopen(req, context=SSL_NOVERIFY) as r:
                 body = r.read()
         except URLError as e:
-            logging.error("favorite POST error: %s", e)
-            self._send(502, b'{"error":"upstream"}', "application/json")
+            self._relay_error("favorite POST error", e)
             return
         self._send(200, body, "application/json")
 
@@ -164,8 +173,7 @@ class Handler(BaseHTTPRequestHandler):
             with urlopen(req, context=SSL_NOVERIFY) as r:
                 body = r.read()
         except URLError as e:
-            logging.error("favorite DELETE error: %s", e)
-            self._send(502, b'{"error":"upstream"}', "application/json")
+            self._relay_error("favorite DELETE error", e)
             return
         self._send(200, body, "application/json")
 
