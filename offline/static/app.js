@@ -79,7 +79,7 @@ async function migrateFavorites() {
 }
 
 // ---------- Find ----------
-async function renderFind() {
+async function renderFind(initialQuery) {
   el.viewFind.innerHTML = "";
   const chips = document.createElement("div");
   chips.id = "chips";
@@ -121,6 +121,12 @@ async function renderFind() {
     b.onclick = () => { input.value = c; search(c, resultsBox); };
     chips.appendChild(b);
   }
+  if (initialQuery) { input.value = initialQuery; search(initialQuery, resultsBox); }
+}
+
+function gotoFind(query) {
+  renderFind(query);
+  showView("find");
 }
 
 async function renderCached(box) {
@@ -301,12 +307,29 @@ async function loadSegment(si) {
   return true;
 }
 
-async function playLine(idx) {
+async function seekLine(idx, { play }) {
   const ln = tl.lines[idx];
   if (audioVtt !== ln.vtt) { if (!(await loadSegment(ln.segIndex))) return; }
   el.player.currentTime = ln.start;
-  el.player.play();
+  if (play) el.player.play();
   setActive(idx);
+  updateClock(ln.epStart);
+}
+
+async function playLine(idx) {
+  await seekLine(idx, { play: true });
+}
+
+async function jumpToFavorite(filename, startStr) {
+  const key = episodeKeyOf(filename);
+  const ep = await DB.get("episodes", key);
+  if (!ep) { gotoFind(podcastOf(filename) + " " + dateOf(filename)); return; }
+  await openEpisode(key);
+  const idx = tl.lines.findIndex((l) => l.vtt === filename && l.startStr === startStr);
+  if (idx < 0) return;
+  await seekLine(idx, { play: false });
+  const li = el.lines.querySelector(`.line[data-index="${idx}"]`);
+  if (li) li.scrollIntoView({ block: "center", behavior: "smooth" });
 }
 
 async function seekEp(epTarget) {
@@ -522,17 +545,32 @@ async function _renderFav() {
   for (const group of groups) {
     const row = document.createElement("div");
     row.className = "fav";
+    const file = group[0].filename;
     const ts = document.createElement("span");
-    ts.className = "ts";
+    ts.className = "ts link";
     ts.textContent = await epStartForFav(group[0]);
+    ts.title = "Jump to this moment";
+    ts.onclick = () => jumpToFavorite(file, group[0].start);
     const body = document.createElement("div");
     body.className = "text";
     const t = document.createElement("div");
     t.textContent = group.map((f) => f.text).join(" ");
     const meta = document.createElement("div");
     meta.className = "meta";
-    const more = group.length > 1 ? ` · ${group.length} lines` : "";
-    meta.textContent = `${podcastOf(group[0].filename)} · ${dateOf(group[0].filename)}${more}`;
+    const pod = document.createElement("span");
+    pod.className = "link";
+    pod.textContent = podcastOf(file);
+    pod.title = "Find this podcast";
+    pod.onclick = () => gotoFind(podcastOf(file));
+    const date = document.createElement("span");
+    date.className = "link";
+    date.textContent = dateOf(file);
+    date.title = "Find this episode";
+    date.onclick = () => gotoFind(podcastOf(file) + " " + dateOf(file));
+    meta.appendChild(pod);
+    meta.appendChild(document.createTextNode(" · "));
+    meta.appendChild(date);
+    if (group.length > 1) meta.appendChild(document.createTextNode(` · ${group.length} lines`));
     body.appendChild(t);
     body.appendChild(meta);
     const send = document.createElement("button");
