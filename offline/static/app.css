@@ -55,11 +55,11 @@ ol#lines { list-style: none; margin: 0; padding: 0; }
 
 #transport { position: fixed; bottom: 0; left: 0; right: 0; background: #fff;
   border-top: 1px solid #ddd; padding: .6rem .5rem; z-index: 10; }
-#scrubber { position: relative; height: 1.4rem; background: #eee; border-radius: .7rem; cursor: pointer; }
+#scrubber { position: relative; height: 1.4rem; background: #eee; cursor: pointer; }
 #scrub-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0;
-  background: #cfe2ff; border-radius: .7rem; }
-#scrub-handle { position: absolute; top: 50%; width: .9rem; height: .9rem; margin-left: -.45rem;
-  transform: translateY(-50%); background: #0d6efd; border-radius: 50%; left: 0; }
+  background: #cfe2ff; }
+#scrub-handle { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1.5px;
+  background: #0d6efd; left: 0; }
 #scrub-marks .mark { position: absolute; top: 0; bottom: 0; width: 2px; background: #f5b301; }
 
 button { cursor: pointer; }
