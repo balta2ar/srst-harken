@@ -185,3 +185,12 @@ real favorites left undisturbed (current baseline 7).
   shell, `becbf59` IndexedDB, `8d3e9e3` View 1, `520d72e` View 2, `3cd0210`
   packaging.
 - rc.arch: `ce5e5a7c` telegram-send-voice exit-code fix.
+
+## Favorite clips — manual browser checks (Tailscale .ts.net host, not raw IP)
+- Open Favorites while online: each group shows a ▶ button.
+- Tap ▶: clip plays from the dedicated player; button shows ⏸; transcript player/scrubber/clock unaffected.
+- Tap ⏸ (same row): stops. Tap another row's ▶: first stops, second plays (only one at a time).
+- Reload, go offline (DevTools), open Favorites: previously-prefetched clips still play (served from IndexedDB).
+- Offline + a clip that was never prefetched: ▶ briefly shows ∅ and does nothing (no crash).
+- DevTools → Application → IndexedDB → srst-offline → clips: rows keyed filename|start|end; deleting a favorite then reopening Favorites (online) prunes its orphaned clip.
+- Network tab: clip requests carry Cache-Control: immutable + ETag; repeat plays of an already-cached clip make NO /api/clip request (served from IndexedDB).
