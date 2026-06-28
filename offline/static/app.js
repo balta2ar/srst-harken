@@ -1030,7 +1030,7 @@ async function jumpToListen(rec) {
   await seekEp(epSeconds);
   const idx = Timeline.lineAtEpTime(tl, epSeconds);
   const li = idx >= 0 ? el.lines.querySelector(`.line[data-index="${idx}"]`) : null;
-  if (li) li.scrollIntoView({ block: "center", behavior: "smooth" });
+  if (li) li.scrollIntoView({ block: "center", behavior: "auto" });
 }
 
 function fmtUpdated(iso) {
