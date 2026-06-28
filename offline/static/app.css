@@ -84,5 +84,8 @@ ol#lines { list-style: none; margin: 0; padding: 0; }
   border-bottom: 1px solid #f0f0f0; cursor: pointer; }
 .topic .ts { font-size: .7rem; color: #20a07a; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .topic .title { flex: 1; font-size: .9rem; }
+.gen-topics { margin: .5rem 1rem; padding: .4rem .8rem; font-size: .85rem;
+  background: #20c997; color: #fff; border: none; border-radius: 4px; }
+.gen-topics:disabled { background: #9bd9c6; cursor: default; }
 
 button { cursor: pointer; }

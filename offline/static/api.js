@@ -66,5 +66,18 @@ const Api = (() => {
       body: JSON.stringify({ filename, position }),
     });
   }
-  return { scopes, lines, favList, audioBlob, favAdd, favDel, exportFav, markExported, topics, listenList, listenPut };
+  async function generateTopics(filename) {
+    try {
+      const r = await fetch("/api/topics", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename }),
+      });
+      if (!r.ok) return null;
+      return r.json();
+    } catch (e) {
+      return null;
+    }
+  }
+  return { scopes, lines, favList, audioBlob, favAdd, favDel, exportFav, markExported, topics, generateTopics, listenList, listenPut };
 })();

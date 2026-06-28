@@ -352,7 +352,7 @@ async function loadTopics(ep) {
 }
 
 function renderTopics() {
-  if (!tl || !tl.topics || !tl.topics.length) { el.topics.hidden = true; return; }
+  if (!tl || !tl.topics || !tl.topics.length) { renderTopicsEmpty(); return; }
   el.topicsCount.textContent = tl.topics.length;
   const rows = tl.topics.map((t) => {
     const li = document.createElement("li");
@@ -373,6 +373,33 @@ function renderTopics() {
   el.topicsCaret.textContent = topicsOpen ? "▾" : "▸";
   el.topicsHead.setAttribute("aria-expanded", topicsOpen ? "true" : "false");
   el.topics.hidden = false;
+}
+
+function renderTopicsEmpty() {
+  if (!tl || !navigator.onLine) { el.topics.hidden = true; return; }
+  el.topicsCount.textContent = "";
+  const btn = document.createElement("button");
+  btn.className = "gen-topics";
+  btn.textContent = "Generate topics";
+  btn.onclick = () => requestTopics(btn);
+  el.topicsList.replaceChildren(btn);
+  el.topicsList.hidden = false;
+  el.topicsCaret.textContent = "☰";
+  el.topicsHead.setAttribute("aria-expanded", "true");
+  el.topics.hidden = false;
+}
+
+async function requestTopics(btn) {
+  if (!tl || !tl.segments || !tl.segments.length) return;
+  btn.disabled = true;
+  btn.textContent = "Generating…";
+  const res = await Api.generateTopics(tl.segments[0].vtt);
+  if (res && (res.status === "started" || res.status === "already running")) {
+    btn.textContent = "Generating… reopen later";
+  } else {
+    btn.disabled = false;
+    btn.textContent = "Generate topics";
+  }
 }
 
 function renderTopicMarks() {

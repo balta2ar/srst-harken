@@ -175,7 +175,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        if parsed.path not in ("/api/favorite", "/api/export", "/api/exported", "/api/listens"):
+        if parsed.path not in ("/api/favorite", "/api/export", "/api/exported", "/api/listens", "/api/topics"):
             self._send(404, b"not found")
             return
         length = int(self.headers.get("Content-Length", 0))
@@ -188,6 +188,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/listens":
             self._proxy_post("/uttale/Listens", raw, "listen POST error")
+            return
+        if parsed.path == "/api/topics":
+            self._proxy_post("/uttale/GenerateTopics", raw, "generate topics error")
             return
         url = f"{self.uttale}/uttale/Favorites"
         req = URLRequest(url, data=raw, method="POST")
