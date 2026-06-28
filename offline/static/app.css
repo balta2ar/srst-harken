@@ -84,3 +84,6 @@ ol#lines { list-style: none; margin: 0; padding: 0; }
 .gen-topics:disabled { background: #9bd9c6; cursor: default; }
 
 button { cursor: pointer; }
+
+.fav .play.playing { color: #20c997; }
+.fav .play:disabled { opacity: .35; cursor: default; }

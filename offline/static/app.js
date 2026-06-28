@@ -4,6 +4,7 @@ const el = {
   viewFav: document.getElementById("view-fav"),
   lines: document.getElementById("lines"),
   player: document.getElementById("player"),
+  clipPlayer: document.getElementById("clip-player"),
   status: document.getElementById("status"),
   navFind: document.getElementById("nav-find"),
   navListen: document.getElementById("nav-listen"),
@@ -716,6 +717,32 @@ async function _renderFav() {
 
 function groupUpdatedAt(group) {
   return group.reduce((m, f) => (f.updatedAt > m ? f.updatedAt : m), "");
+}
+
+function clipTs(ts, delta) {
+  return Timeline.fmtVtt(Math.max(0, Timeline.tsToSeconds(ts) + delta));
+}
+
+// A favorite group is adjacent lines in one file; its clip spans the first
+// member's start to the last member's end, padded ±0.5s (same as export), so one
+// cached clip serves both playback and export.
+function clipSpan(group) {
+  const first = group[0], last = group[group.length - 1];
+  const filename = first.filename;
+  const start = clipTs(first.start, -0.5);
+  const end = clipTs(last.end || last.start, 0.5);
+  return { filename, start, end, id: filename + "|" + start + "|" + end };
+}
+
+async function getClip(group) {
+  const span = clipSpan(group);
+  const cached = await DB.get("clips", span.id);
+  if (cached && cached.blob) return cached.blob;
+  if (!navigator.onLine) return null;
+  const blob = await Api.clipBlob(span.filename, span.start, span.end);
+  if (!blob) return null;
+  await DB.put("clips", { id: span.id, blob });
+  return blob;
 }
 
 function fmtExportedAt(iso) {
