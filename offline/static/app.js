@@ -94,6 +94,7 @@ window.addEventListener("online", () => {
 window.addEventListener("offline", updateStatus);
 
 // ---------- Find ----------
+const REINDEX_REFRESH_MS = 5000;
 async function renderFind(initialQuery) {
   el.viewFind.innerHTML = "";
   const chips = document.createElement("div");
@@ -112,11 +113,22 @@ async function renderFind(initialQuery) {
   el.cachedBox = cachedBox;
   await renderCached(cachedBox);
 
+  const resultsHead = document.createElement("div");
+  resultsHead.className = "results-head";
   const resultsHdr = document.createElement("h3");
   resultsHdr.textContent = "Search results";
-  el.viewFind.appendChild(resultsHdr);
+  resultsHead.appendChild(resultsHdr);
+  const reindexBtn = document.createElement("button");
+  reindexBtn.className = "reindex-btn";
+  reindexBtn.textContent = "Reindex";
+  reindexBtn.hidden = true;
+  reindexBtn.title = "Reindex everything matching this search on the server";
+  resultsHead.appendChild(reindexBtn);
+  el.viewFind.appendChild(resultsHead);
+  el.reindexBtn = reindexBtn;
   const resultsBox = document.createElement("div");
   el.viewFind.appendChild(resultsBox);
+  reindexBtn.onclick = () => reindexSearch(input.value, resultsBox, reindexBtn);
 
   const reset = document.createElement("button");
   reset.className = "danger";
@@ -174,6 +186,7 @@ async function cachedEpisodeKeys() {
 }
 
 async function search(query, box) {
+  if (el.reindexBtn) el.reindexBtn.hidden = !(navigator.onLine && (query || "").trim());
   box.innerHTML = "<p><small>Searching…</small></p>";
   let data;
   try { data = await Api.scopes(query); }
@@ -207,6 +220,27 @@ async function search(query, box) {
       row.onclick = () => downloadEpisode(k, segs, label);
     }
     box.appendChild(row);
+  }
+}
+
+async function reindexSearch(query, box, btn) {
+  const q = (query || "").trim();
+  if (!q || !navigator.onLine) return;
+  btn.disabled = true;
+  btn.textContent = "Reindexing…";
+  let res;
+  try { res = await Api.reindex(q); } catch (e) { res = null; }
+  const restore = () => { btn.disabled = false; btn.textContent = "Reindex"; };
+  if (res && (res.status === "started" || res.status === "already running")) {
+    btn.textContent = res.truncated ? `Reindexed ${res.matched}+ — narrow query`
+      : (res.status === "started" ? `Reindexed ${res.matched}` : "Already running…");
+    setTimeout(() => { search(q, box); restore(); }, REINDEX_REFRESH_MS);
+  } else if (res && res.status === "nothing matched") {
+    btn.textContent = "Nothing to index";
+    setTimeout(restore, 2000);
+  } else {
+    btn.textContent = "Reindex failed";
+    setTimeout(restore, 2000);
   }
 }
 

@@ -92,6 +92,12 @@ ol#lines { list-style: none; margin: 0; padding: 0; }
   background: #20c997; color: #fff; border: none; border-radius: 4px; }
 .gen-topics:disabled { background: #9bd9c6; cursor: default; }
 
+.results-head { display: flex; align-items: center; gap: .5rem; }
+.results-head h3 { flex: 1; margin: 0; }
+.reindex-btn { padding: .3rem .7rem; font-size: .8rem; background: #20c997;
+  color: #fff; border: none; border-radius: 4px; white-space: nowrap; }
+.reindex-btn:disabled { background: #9bd9c6; cursor: default; }
+
 button { cursor: pointer; }
 
 .fav .play.playing { color: #20c997; }
