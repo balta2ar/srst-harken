@@ -1,5 +1,4 @@
 const el = {
-  banner: document.getElementById("banner"),
   viewFind: document.getElementById("view-find"),
   viewListen: document.getElementById("view-listen"),
   viewFav: document.getElementById("view-fav"),
@@ -58,7 +57,7 @@ function showView(which) {
   el.navRecent.classList.toggle("active", which === "recent");
 }
 el.navFind.onclick = () => { renderFind(); showView("find"); };
-el.navListen.onclick = () => { showView("listen"); setTimeout(scrollToCurrent, 0); };
+el.navListen.onclick = () => { showView("listen"); setTimeout(() => scrollToCurrent("auto"), 0); };
 el.navFav.onclick = () => {
   showView("fav");
   renderFav();
@@ -481,9 +480,9 @@ function setActive(idx) {
   currentLine = idx;
 }
 
-function scrollToCurrent() {
+function scrollToCurrent(behavior) {
   const li = el.lines.querySelector(".line.active");
-  if (li) li.scrollIntoView({ block: "center", behavior: "smooth" });
+  if (li) li.scrollIntoView({ block: "center", behavior: behavior === "auto" ? "auto" : "smooth" });
 }
 
 function updateClock(epNow) {
@@ -993,22 +992,8 @@ function refreshRecentIfActive() {
   if (!el.viewRecent.hidden) renderListened();
 }
 
-// ---------- Banner ----------
-function maybeBanner() {  if (localStorage.getItem("origin-hint-dismissed")) return;
-  const h = location.hostname;
-  const isIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.includes(":");
-  if (!isIp) return;
-  el.banner.hidden = false;
-  el.banner.innerHTML = "<span>Tip: open via your Tailscale name so favorites travel across networks.</span>";
-  const x = document.createElement("button");
-  x.textContent = "✕";
-  x.onclick = () => { el.banner.hidden = true; localStorage.setItem("origin-hint-dismissed", "1"); };
-  el.banner.appendChild(x);
-}
-
 // ---------- Boot ----------
 (async function boot() {
-  maybeBanner();
   await migrateFavorites();
   await updateStatus();
   await updateRecentCount();
