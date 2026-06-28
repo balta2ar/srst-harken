@@ -134,6 +134,10 @@ class Handler(BaseHTTPRequestHandler):
         cl = upstream.headers.get("Content-Length")
         if cl:
             self.send_header("Content-Length", cl)
+        for h in ("ETag", "Cache-Control"):
+            v = upstream.headers.get(h)
+            if v:
+                self.send_header(h, v)
         self.end_headers()
         try:
             while chunk := upstream.read(CHUNK):
@@ -158,6 +162,13 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/audio":
             self._proxy_audio({
                 "filename": q.get("filename", [""])[0], "start": "", "end": ""})
+        elif parsed.path == "/api/clip":
+            ogg = str(Path(q.get("filename", [""])[0]).with_suffix(".ogg"))
+            self._proxy_audio({
+                "filename": ogg,
+                "start": q.get("start", [""])[0],
+                "end": q.get("end", [""])[0],
+            })
         elif parsed.path == "/api/favorites":
             self._proxy_json("/uttale/Favorites", {"sort": "created_desc"})
         else:
