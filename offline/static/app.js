@@ -770,9 +770,12 @@ async function _renderFav() {
     del.onclick = () => deleteGroup(group);
     row.appendChild(ts);
     row.appendChild(body);
-    row.appendChild(play);
-    row.appendChild(send);
-    row.appendChild(del);
+    const actions = document.createElement("div");
+    actions.className = "fav-actions";
+    actions.appendChild(play);
+    actions.appendChild(send);
+    actions.appendChild(del);
+    row.appendChild(actions);
     frag.appendChild(row);
   }
   el.viewFav.replaceChildren(frag);
