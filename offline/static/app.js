@@ -84,19 +84,6 @@ window.addEventListener("online", () => {
 });
 window.addEventListener("offline", updateStatus);
 
-const VTT_TS = /^\d{2}:\d{2}:\d{2}\.\d{3}$/;
-
-// One-time heal: drop favorites saved by an earlier build with a numeric start
-// (e.g. 11.3 instead of "00:00:11.300"). The backend rejected those with HTTP 422
-// so they were never stored server-side and only jammed the pending counter.
-async function migrateFavorites() {
-  for (const f of await DB.all("favorites")) {
-    if (typeof f.start !== "string" || !VTT_TS.test(f.start)) {
-      await DB.del("favorites", f.id);
-    }
-  }
-}
-
 // ---------- Find ----------
 async function renderFind(initialQuery) {
   el.viewFind.innerHTML = "";
@@ -994,7 +981,6 @@ function refreshRecentIfActive() {
 
 // ---------- Boot ----------
 (async function boot() {
-  await migrateFavorites();
   await updateStatus();
   await updateRecentCount();
   setInterval(recordListen, 5000);
