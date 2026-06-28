@@ -328,7 +328,7 @@ async function reindexSearch(query, box, btn) {
   if (res && (res.status === "started" || res.status === "already running")) {
     btn.textContent = res.truncated ? `Reindexed ${res.matched}+ — narrow query`
       : (res.status === "started" ? `Reindexed ${res.matched}` : "Already running…");
-    setTimeout(() => { search(q, box); restore(); }, REINDEX_REFRESH_MS);
+    setTimeout(() => { if (el.reindexBtn === btn) search(q, box); restore(); }, REINDEX_REFRESH_MS);
   } else if (res && res.status === "nothing matched") {
     btn.textContent = "Nothing to index";
     setTimeout(restore, 2000);
