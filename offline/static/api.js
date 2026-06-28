@@ -79,5 +79,15 @@ const Api = (() => {
       return null;
     }
   }
-  return { scopes, lines, favList, audioBlob, favAdd, favDel, exportFav, markExported, topics, generateTopics, listenList, listenPut };
+  async function clipBlob(filename, start, end) {
+    try {
+      const r = await fetch("/api/clip?filename=" + encodeURIComponent(filename) +
+        "&start=" + encodeURIComponent(start) + "&end=" + encodeURIComponent(end));
+      if (!r.ok) return null;
+      return r.blob();
+    } catch (e) {
+      return null;
+    }
+  }
+  return { scopes, lines, favList, audioBlob, favAdd, favDel, exportFav, markExported, topics, generateTopics, clipBlob, listenList, listenPut };
 })();
