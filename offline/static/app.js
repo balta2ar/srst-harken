@@ -38,6 +38,7 @@ let currentSeg = 0;      // active segment index
 let currentLine = -1;    // active line idx
 let autoscroll = false;  // follow the playing line (toggled via the total-time tap)
 let topicsOpen = false;  // topics panel expanded (persists across episodes in-session)
+let playingClipId = null; // id of the favorite clip currently playing (dedicated clip player)
 const LISTENS_LIMIT = 10;  // keep only the N most recent listens (matches server)
 
 function episodeKeyOf(vtt) { return vtt.split("/").slice(0, 3).join("/"); }
@@ -62,8 +63,10 @@ el.navListen.onclick = () => { showView("listen"); setTimeout(() => scrollToCurr
 el.navFav.onclick = () => {
   showView("fav");
   renderFav();
-  if (navigator.onLine) syncFavorites().then(renderFav);
+  if (navigator.onLine) syncFavorites().then(() => { renderFav(); prefetchClips(); });
+  else prefetchClips();
 };
+el.clipPlayer.addEventListener("ended", stopClip);
 el.navRecent.onclick = () => {
   showView("recent");
   renderListened();
@@ -691,6 +694,13 @@ async function _renderFav() {
     if (group.length > 1) meta.appendChild(document.createTextNode(` · ${group.length} lines`));
     body.appendChild(t);
     body.appendChild(meta);
+    const play = document.createElement("button");
+    play.className = "play";
+    play.dataset.clip = clipSpan(group).id;
+    play.textContent = (playingClipId === clipSpan(group).id && !el.clipPlayer.paused) ? "⏸" : "▶";
+    if (playingClipId === clipSpan(group).id && !el.clipPlayer.paused) play.classList.add("playing");
+    play.title = "Play this clip";
+    play.onclick = () => playClip(group, play);
     const send = document.createElement("button");
     const exported = group.every((f) => f.exported_at);
     if (exported) {
@@ -708,6 +718,7 @@ async function _renderFav() {
     del.onclick = () => deleteGroup(group);
     row.appendChild(ts);
     row.appendChild(body);
+    row.appendChild(play);
     row.appendChild(send);
     row.appendChild(del);
     frag.appendChild(row);
@@ -743,6 +754,65 @@ async function getClip(group) {
   if (!blob) return null;
   await DB.put("clips", { id: span.id, blob });
   return blob;
+}
+
+function stopClip() {
+  el.clipPlayer.pause();
+  const prev = el.clipPlayer.src;
+  el.clipPlayer.removeAttribute("src");
+  if (prev && prev.startsWith("blob:")) URL.revokeObjectURL(prev);
+  if (playingClipId) {
+    const b = el.viewFav.querySelector(`.play[data-clip="${playingClipId}"]`);
+    if (b) { b.textContent = "▶"; b.classList.remove("playing"); }
+  }
+  playingClipId = null;
+}
+
+async function playClip(group, btn) {
+  const id = clipSpan(group).id;
+  if (playingClipId === id && !el.clipPlayer.paused) { stopClip(); return; }
+  stopClip();
+  btn.disabled = true;
+  const blob = await getClip(group);
+  btn.disabled = false;
+  if (!blob) {
+    const prev = btn.textContent;
+    btn.textContent = "∅";
+    setTimeout(() => { btn.textContent = prev; }, 1000);
+    return;
+  }
+  el.clipPlayer.src = URL.createObjectURL(blob);
+  el.clipPlayer.play();
+  btn.textContent = "⏸";
+  btn.classList.add("playing");
+  playingClipId = id;
+}
+
+// Fetch+cache every current group's clip (when online) so favorites are playable
+// offline; then drop clips whose groups no longer exist.
+async function prefetchClips() {
+  let favs;
+  try { favs = (await DB.all("favorites")).filter((f) => f.status !== "deleted"); }
+  catch (e) { return; }
+  if (!favs.length) {
+    const all = await DB.all("clips");
+    for (const c of all) await DB.del("clips", c.id);
+    return;
+  }
+  const files = [...new Set(favs.map((f) => f.filename))];
+  const indexOf = await buildLineIndexResolver(files);
+  const groups = groupFavorites(favs, indexOf);
+  const valid = new Set();
+  for (const g of groups) {
+    const id = clipSpan(g).id;
+    valid.add(id);
+    if (navigator.onLine) {
+      try { await getClip(g); } catch (e) { /* best-effort */ }
+    }
+  }
+  for (const c of await DB.all("clips")) {
+    if (!valid.has(c.id)) await DB.del("clips", c.id);
+  }
 }
 
 function fmtExportedAt(iso) {
@@ -1017,6 +1087,7 @@ function refreshRecentIfActive() {
     await syncListens();
     await updateRecentCount();
   }
+  prefetchClips();
   renderFind();
   showView("find");
 })();
