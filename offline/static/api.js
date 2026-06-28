@@ -79,6 +79,19 @@ const Api = (() => {
       return null;
     }
   }
+  async function reindex(pattern) {
+    try {
+      const r = await fetch("/api/reindex", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pattern }),
+      });
+      if (!r.ok) return null;
+      return r.json();
+    } catch (e) {
+      return null;
+    }
+  }
   async function clipBlob(filename, start, end) {
     try {
       const r = await fetch("/api/clip?filename=" + encodeURIComponent(filename) +
@@ -89,5 +102,5 @@ const Api = (() => {
       return null;
     }
   }
-  return { scopes, lines, favList, audioBlob, favAdd, favDel, exportFav, markExported, topics, generateTopics, clipBlob, listenList, listenPut };
+  return { scopes, lines, favList, audioBlob, favAdd, favDel, exportFav, markExported, topics, generateTopics, reindex, clipBlob, listenList, listenPut };
 })();
