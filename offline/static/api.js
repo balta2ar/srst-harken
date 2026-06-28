@@ -1,6 +1,11 @@
 const Api = (() => {
   async function scopes(q) {
     const r = await fetch("/api/scopes?q=" + encodeURIComponent(q));
+    if (!r.ok) {
+      let body = "";
+      try { body = (await r.text()).slice(0, 120); } catch (e) {}
+      throw new Error("HTTP " + r.status + (body ? " " + body : ""));
+    }
     return r.json();
   }
   async function lines(vtt) {

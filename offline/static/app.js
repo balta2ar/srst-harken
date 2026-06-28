@@ -189,7 +189,17 @@ async function search(query, box) {
   box.innerHTML = "<p><small>Searching…</small></p>";
   let data;
   try { data = await Api.scopes(query); }
-  catch (e) { box.innerHTML = "<p><small>Offline — can't search.</small></p>"; return; }
+  catch (e) {
+    const net = navigator.onLine ? "online" : "offline";
+    const msg = `${e && e.name ? e.name : "Error"}: ${e && e.message ? e.message : e}`;
+    box.innerHTML = "";
+    const p = document.createElement("p");
+    const s = document.createElement("small");
+    s.textContent = `Search failed (${net}) — ${msg}`;
+    p.appendChild(s);
+    box.appendChild(p);
+    return;
+  }
   const groups = {};
   for (const vtt of data.results || []) {
     const k = episodeKeyOf(vtt);
