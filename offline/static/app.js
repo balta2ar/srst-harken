@@ -730,8 +730,15 @@ function groupUpdatedAt(group) {
   return group.reduce((m, f) => (f.updatedAt > m ? f.updatedAt : m), "");
 }
 
+// Mirror Python export's format_ts (offline.py): TRUNCATE ms (not round, unlike
+// Timeline.fmtVtt) so the playback clip span === the Telegram-export span and one
+// cached clip id/ETag serves both.
 function clipTs(ts, delta) {
-  return Timeline.fmtVtt(Math.max(0, Timeline.tsToSeconds(ts) + delta));
+  const sec = Math.max(0, Timeline.tsToSeconds(ts) + delta);
+  const ms = Math.trunc((sec % 1) * 1000);
+  const whole = Math.trunc(sec);
+  const s = whole % 60, m = Math.trunc(whole / 60) % 60, h = Math.trunc(whole / 3600);
+  return [h, m, s].map((n) => String(n).padStart(2, "0")).join(":") + "." + String(ms).padStart(3, "0");
 }
 
 // A favorite group is adjacent lines in one file; its clip spans the first
@@ -789,12 +796,17 @@ async function playClip(group, btn) {
 }
 
 // Fetch+cache every current group's clip (when online) so favorites are playable
-// offline; then drop clips whose groups no longer exist.
+// offline; then drop clips whose groups no longer exist. Pruning is online-only:
+// offline we can't authoritatively re-derive groups (non-downloaded episodes have
+// no line index, so a multi-line group fragments and its clip id wouldn't be in
+// the valid set), so an offline prune would delete prefetched clips. Offline this
+// is a pure no-op that never deletes.
 async function prefetchClips() {
   let favs;
   try { favs = (await DB.all("favorites")).filter((f) => f.status !== "deleted"); }
   catch (e) { return; }
   if (!favs.length) {
+    if (!navigator.onLine) return;
     const all = await DB.all("clips");
     for (const c of all) await DB.del("clips", c.id);
     return;
@@ -810,6 +822,7 @@ async function prefetchClips() {
       try { await getClip(g); } catch (e) { /* best-effort */ }
     }
   }
+  if (!navigator.onLine) return;
   for (const c of await DB.all("clips")) {
     if (!valid.has(c.id)) await DB.del("clips", c.id);
   }
