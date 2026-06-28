@@ -39,6 +39,7 @@ let currentLine = -1;    // active line idx
 let autoscroll = false;  // follow the playing line (toggled via the total-time tap)
 let topicsOpen = false;  // topics panel expanded (persists across episodes in-session)
 let playingClipId = null; // id of the favorite clip currently playing (dedicated clip player)
+let favSort = "added";   // favorites sort mode: "added" (recent first) | "podcast" (podcast asc, date desc)
 const LISTENS_LIMIT = 10;  // keep only the N most recent listens (matches server)
 
 function episodeKeyOf(vtt) { return vtt.split("/").slice(0, 3).join("/"); }
@@ -701,6 +702,16 @@ async function _renderFav() {
   exportAll.textContent = "Export all (unexported)";
   exportAll.onclick = () => exportAllUnexported(exportAll);
   hdr.appendChild(exportAll);
+  const sortBox = document.createElement("div");
+  sortBox.className = "fav-sort";
+  for (const [mode, label] of [["added", "By added"], ["podcast", "By podcast"]]) {
+    const b = document.createElement("button");
+    b.textContent = label;
+    if (favSort === mode) b.classList.add("active");
+    b.onclick = () => { if (favSort !== mode) { favSort = mode; renderFav(); } };
+    sortBox.appendChild(b);
+  }
+  hdr.appendChild(sortBox);
   frag.appendChild(hdr);
 
   const favs = (await DB.all("favorites")).filter((f) => f.status !== "deleted");
@@ -711,9 +722,7 @@ async function _renderFav() {
   }
   const files = [...new Set(favs.map((f) => f.filename))];
   const indexOf = await resolveLocalOrder(files);
-  const groups = groupFavorites(favs, indexOf);
-  // Most-recently-touched group first (by max member updatedAt).
-  groups.sort((a, b) => groupUpdatedAt(b) < groupUpdatedAt(a) ? -1 : 1);
+  const groups = sortFavGroups(groupFavorites(favs, indexOf), favSort);
 
   for (const group of groups) {
     const row = document.createElement("div");
@@ -783,6 +792,25 @@ async function _renderFav() {
 
 function groupUpdatedAt(group) {
   return group.reduce((m, f) => (f.updatedAt > m ? f.updatedAt : m), "");
+}
+
+// Order favorite groups for display. "added": most-recently-touched first (by max
+// member updatedAt). "podcast": grouped by podcast name (asc), recent episodes
+// first within a podcast (date desc), then recent edits first as a tiebreak.
+function sortFavGroups(groups, mode) {
+  const sorted = groups.slice();
+  if (mode === "podcast") {
+    sorted.sort((a, b) => {
+      const pa = podcastOf(a[0].filename), pb = podcastOf(b[0].filename);
+      if (pa !== pb) return pa < pb ? -1 : 1;
+      const da = dateOf(a[0].filename), db = dateOf(b[0].filename);
+      if (da !== db) return da < db ? 1 : -1;
+      return groupUpdatedAt(b) < groupUpdatedAt(a) ? -1 : 1;
+    });
+  } else {
+    sorted.sort((a, b) => groupUpdatedAt(b) < groupUpdatedAt(a) ? -1 : 1);
+  }
+  return sorted;
 }
 
 // Mirror Python export's format_ts (offline.py): TRUNCATE ms (not round, unlike

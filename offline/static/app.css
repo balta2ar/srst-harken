@@ -53,6 +53,10 @@ ol#lines { list-style: none; margin: 0; padding: 0; }
 .fav .exported { color: #28a745; }
 .fav button { background: none; border: none; cursor: pointer; font-size: 1.1rem; align-self: center; }
 .fav-actions { display: flex; gap: .25rem; align-self: center; flex-shrink: 0; }
+.fav-sort { display: flex; gap: .25rem; margin-left: auto; flex-shrink: 0; }
+.fav-sort button { font-size: .75rem; padding: .15rem .5rem; border: 1px solid #ccc;
+  border-radius: 1rem; background: #fff; color: #555; cursor: pointer; white-space: nowrap; }
+.fav-sort button.active { background: #0d6efd; border-color: #0d6efd; color: #fff; }
 @media (max-width: 640px) {
   .fav-actions { flex-direction: column; gap: .1rem; }
   .fav-actions button { font-size: 1rem; line-height: 1.3; padding: 0; }
