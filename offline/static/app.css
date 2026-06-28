@@ -90,7 +90,7 @@ ol#lines { list-style: none; margin: 0; padding: 0; }
 .topic .title { flex: 1; font-size: .9rem; }
 .gen-topics { margin: .5rem 1rem; }
 
-.results-head { display: flex; align-items: center; gap: .5rem; }
+.results-head { display: flex; align-items: center; gap: .5rem; margin: 1em 0; }
 .results-head h3 { flex: 1; margin: 0; }
 
 button { cursor: pointer; }
