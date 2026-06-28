@@ -1,4 +1,4 @@
-const CACHE = "srst-offline-v3";
+const CACHE = "srst-offline-v4";
 const SHELL = [
   "/",
   "/index.html",
@@ -8,6 +8,7 @@ const SHELL = [
   "/timeline.js",
   "/app.js",
   "/manifest.webmanifest",
+  "/favicon.ico",
   "/icon-192.png",
   "/icon-512.png",
 ];
