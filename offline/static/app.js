@@ -512,8 +512,8 @@ el.tPlay.onclick = () => {
 el.player.addEventListener("play", () => { el.tPlay.textContent = "⏸"; recordListen({ force: true }); });
 el.player.addEventListener("pause", () => { el.tPlay.textContent = "▶"; recordListen({ force: true }); });
 
-el.clockNow.onclick = () => scrollToCurrent();
-el.clockTotal.onclick = () => { setAutoscroll(!autoscroll); if (autoscroll) scrollToCurrent(); };
+el.clockNow.onclick = () => scrollToCurrent("auto");
+el.clockTotal.onclick = () => { setAutoscroll(!autoscroll); if (autoscroll) scrollToCurrent("auto"); };
 
 function setAutoscroll(on) {
   autoscroll = on;
