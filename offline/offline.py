@@ -111,7 +111,7 @@ class Handler(BaseHTTPRequestHandler):
             extra["Service-Worker-Allowed"] = "/"
         self._send(200, target.read_bytes(), ctype, extra)
 
-    def _proxy_json(self, upstream_path, params):
+    def _proxy_json(self, upstream_path, params, cache=False):
         url = f"{self.uttale}{upstream_path}?{urlencode(params)}"
         try:
             with urlopen(url, context=SSL_NOVERIFY) as r:
@@ -120,7 +120,8 @@ class Handler(BaseHTTPRequestHandler):
             logging.error("proxy error %s: %s", url, e)
             self._send(502, b'{"error":"upstream"}', "application/json")
             return
-        self._send(200, body, "application/json")
+        extra = {"Cache-Control": "public, max-age=31536000, immutable"} if cache else None
+        self._send(200, body, "application/json", extra)
 
     def _proxy_audio(self, params):
         url = f"{self.uttale}/uttale/Audio?{urlencode(params)}"
@@ -154,7 +155,7 @@ class Handler(BaseHTTPRequestHandler):
                 "q": q.get("q", [""])[0], "limit": SCOPE_LIMIT})
         elif parsed.path == "/api/lines":
             self._proxy_json("/uttale/Search", {
-                "q": "", "scope": q.get("scope", [""])[0], "limit": 1000})
+                "q": "", "scope": q.get("scope", [""])[0], "limit": 1000}, cache=True)
         elif parsed.path == "/api/topics":
             self._proxy_json("/uttale/Topics", {
                 "filename": q.get("filename", [""])[0]})

@@ -63,8 +63,12 @@ el.navListen.onclick = () => { showView("listen"); setTimeout(() => scrollToCurr
 el.navFav.onclick = () => {
   showView("fav");
   renderFav();
-  if (navigator.onLine) syncFavorites().then(() => { renderFav(); prefetchClips(); });
-  else prefetchClips();
+  if (navigator.onLine) {
+    syncFavorites().then(() => { renderFav(); prefetchClips(); });
+    refineFavOrder().then((learned) => { if (learned) renderFav(); });
+  } else {
+    prefetchClips();
+  }
 };
 el.clipPlayer.addEventListener("ended", stopClip);
 el.navRecent.onclick = () => {
@@ -574,31 +578,79 @@ async function epStartForFav(f) {
   return Timeline.fmt(hit ? hit.epStart : Timeline.tsToSeconds(f.start));
 }
 
-// Map (filename, start) -> line index within the file. Line order comes from the
-// cached episode segments, else a one-shot /api/lines fetch when online. Returns a
-// per-render memoized resolver; favorites whose file order is unknown get undefined
-// (and therefore render ungrouped).
-async function buildLineIndexResolver(filenames) {
-  const byFileStart = {};
-  for (const filename of filenames) {
-    let starts = null;
-    const ep = await DB.get("episodes", episodeKeyOf(filename));
-    if (ep) {
-      const seg = await DB.get("segments", filename);
-      if (seg) starts = seg.lines.map((l) => l.start);
+// Line-order ([start strings]) for one file. Immutable per VTT, so it's
+// persisted in the `lineorder` store and fetched at most once ever. Priority:
+// lineorder store -> downloaded segments (mirrored into lineorder) -> when
+// allowNetwork and online, /api/lines (persisted). Returns null if unknown.
+async function orderForFile(filename, allowNetwork) {
+  const cached = await DB.get("lineorder", filename);
+  if (cached && Array.isArray(cached.starts)) return cached.starts;
+  const ep = await DB.get("episodes", episodeKeyOf(filename));
+  if (ep) {
+    const seg = await DB.get("segments", filename);
+    if (seg) {
+      const starts = seg.lines.map((l) => l.start);
+      await DB.put("lineorder", { filename, starts });
+      return starts;
     }
-    if (!starts && navigator.onLine) {
-      try {
-        const data = await Api.lines(filename);
-        if (data && Array.isArray(data.results)) starts = data.results.map((l) => l.start);
-      } catch (e) { /* leave unknown */ }
-    }
-    if (starts) starts.forEach((s, i) => { byFileStart[filename + "|" + s] = i; });
   }
+  if (allowNetwork && navigator.onLine) {
+    try {
+      const data = await Api.lines(filename);
+      if (data && Array.isArray(data.results)) {
+        const starts = data.results.map((l) => l.start);
+        await DB.put("lineorder", { filename, starts });
+        return starts;
+      }
+    } catch (e) { /* leave unknown */ }
+  }
+  return null;
+}
+
+function makeResolver(byFileStart) {
   return (f) => {
     const k = f.filename + "|" + f.start;
     return Object.prototype.hasOwnProperty.call(byFileStart, k) ? byFileStart[k] : undefined;
   };
+}
+
+// Map (filename, start) -> line index, persisting any order it discovers. May
+// fetch /api/lines for files whose order isn't cached yet.
+async function buildLineIndexResolver(filenames) {
+  const byFileStart = {};
+  for (const filename of filenames) {
+    const starts = await orderForFile(filename, true);
+    if (starts) starts.forEach((s, i) => { byFileStart[filename + "|" + s] = i; });
+  }
+  return makeResolver(byFileStart);
+}
+
+// Same map but LOCAL ONLY (never hits the network) — for the immediate paint.
+async function resolveLocalOrder(filenames) {
+  const byFileStart = {};
+  for (const filename of filenames) {
+    const starts = await orderForFile(filename, false);
+    if (starts) starts.forEach((s, i) => { byFileStart[filename + "|" + s] = i; });
+  }
+  return makeResolver(byFileStart);
+}
+
+// Background (online): fetch+persist line-order for favorited files whose order
+// isn't local yet, so the next paint groups correctly. Returns true if it learned
+// any new order (caller should repaint).
+async function refineFavOrder() {
+  if (!navigator.onLine) return false;
+  let favs;
+  try { favs = (await DB.all("favorites")).filter((f) => f.status !== "deleted"); }
+  catch (e) { return false; }
+  const files = [...new Set(favs.map((f) => f.filename))];
+  let learned = false;
+  for (const filename of files) {
+    if (await DB.get("lineorder", filename)) continue;
+    const starts = await orderForFile(filename, true);
+    if (starts) learned = true;
+  }
+  return learned;
 }
 
 function tsSeconds(s) {
@@ -658,7 +710,7 @@ async function _renderFav() {
     return;
   }
   const files = [...new Set(favs.map((f) => f.filename))];
-  const indexOf = await buildLineIndexResolver(files);
+  const indexOf = await resolveLocalOrder(files);
   const groups = groupFavorites(favs, indexOf);
   // Most-recently-touched group first (by max member updatedAt).
   groups.sort((a, b) => groupUpdatedAt(b) < groupUpdatedAt(a) ? -1 : 1);

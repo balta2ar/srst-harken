@@ -1,6 +1,6 @@
 const DB = (() => {
   const NAME = "srst-offline";
-  const VERSION = 3;
+  const VERSION = 4;
   let _db = null;
 
   function open() {
@@ -14,6 +14,7 @@ const DB = (() => {
         if (!db.objectStoreNames.contains("favorites")) db.createObjectStore("favorites", { keyPath: "id" });
         if (!db.objectStoreNames.contains("listened")) db.createObjectStore("listened", { keyPath: "id" });
         if (!db.objectStoreNames.contains("clips")) db.createObjectStore("clips", { keyPath: "id" });
+        if (!db.objectStoreNames.contains("lineorder")) db.createObjectStore("lineorder", { keyPath: "filename" });
       };
       req.onsuccess = () => { _db = req.result; resolve(_db); };
       req.onerror = () => reject(req.error);
