@@ -119,7 +119,6 @@ async function renderFind(initialQuery) {
   resultsHdr.textContent = "Search results";
   resultsHead.appendChild(resultsHdr);
   const reindexBtn = document.createElement("button");
-  reindexBtn.className = "reindex-btn";
   reindexBtn.textContent = "Reindex";
   reindexBtn.hidden = true;
   reindexBtn.title = "Reindex everything matching this search on the server";
