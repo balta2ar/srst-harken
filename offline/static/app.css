@@ -38,7 +38,7 @@ main { padding: .5rem; }
 
 ol#lines { list-style: none; margin: 0; padding: 0; }
 .line { padding: .4rem .5rem; border-bottom: 1px solid #eee; display: flex;
-  gap: .5rem; align-items: baseline; cursor: pointer; scroll-margin-bottom: 5rem; }
+  gap: .5rem; align-items: baseline; cursor: pointer; scroll-margin-bottom: 8rem; }
 .line .text { flex: 1; }
 .line .ts { font-size: .7rem; color: #999; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .line.active { background: #dfffd6; }
