@@ -580,6 +580,16 @@ el.scrubber.addEventListener("pointerup", () => { scrubbing = false; });
 el.scrubber.addEventListener("pointercancel", () => { scrubbing = false; });
 
 // ---------- Favorites ----------
+function normalizeComment(value) {
+  const s = (value == null ? "" : String(value)).replace(/\s+$/, "");
+  return s.trim() === "" ? "" : s;
+}
+
+function buildExportText(joinedText, comment) {
+  const c = normalizeComment(comment);
+  return c ? joinedText + "\n\n" + c : joinedText;
+}
+
 async function toggleFavorite(ln, star) {
   // Identity uses the VTT-string start so it matches the server (which stores
   // start as a VTT string). tl.lines carries startStr; Favorites-view callers
