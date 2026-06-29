@@ -839,8 +839,8 @@ async function _renderFav() {
     meta.appendChild(document.createTextNode(" · "));
     meta.appendChild(date);
     if (group.length > 1) meta.appendChild(document.createTextNode(` · ${group.length} lines`));
-    body.appendChild(t);
     body.appendChild(meta);
+    body.appendChild(t);
     const comment = (group[0].comment || "");
     if (comment) row.classList.add("has-comment");
     const cmt = document.createElement("div");

@@ -99,11 +99,16 @@ No other API or proxy change.
 
 In `_renderFav`'s per-group loop (`app.js:770-831`):
 
-* After building `body` (text + meta), append a comment element:
+* `body` is laid out meta-first so the text and comment stay adjacent: append
+  the `meta` line (podcast · date · N lines) at the TOP of `body`, then the
+  favorite text, then the comment element.
+* After the text, append a comment element:
   * If `group[0].comment` is non-empty: a `div.fav-comment` showing the comment
     text (preserve newlines via `white-space: pre-wrap`); add class `has-comment`
     to the `.fav` row.
   * Else: a `div.fav-comment.placeholder` showing a muted `+ add comment`.
+* The comment text renders at the same size as the favorite text (no explicit
+  font-size; inherits the row), styled grey.
 * Clicking the comment element (text or placeholder) replaces it in place with a
   `<textarea.fav-comment-edit>` pre-filled with the current comment, focused,
   caret at end, auto-sized to its content.
@@ -149,11 +154,12 @@ i.e. exactly one visible blank line between text and comment.
 In `app.css`, favorites block:
 
 * `.fav.has-comment { background: #eef6ec; }`
-* `.fav-comment { font-size: .8rem; color: #555; white-space: pre-wrap;
-  cursor: text; margin-top: .15rem; }`
+* `.fav .meta { ... margin-bottom: .15rem; }` (meta now sits above the text)
+* `.fav-comment { color: #555; white-space: pre-wrap; cursor: text;
+  margin-top: .15rem; }` (no font-size — matches the favorite text size)
 * `.fav-comment.placeholder { color: #aaa; font-style: italic; }`
 * `.fav-comment-edit { width: 100%; box-sizing: border-box; font: inherit;
-  font-size: .8rem; resize: none; overflow: hidden; }`
+  resize: none; overflow: hidden; }`
 
 (Exact shades may be tuned later.)
 
