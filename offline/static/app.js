@@ -596,8 +596,9 @@ async function saveComment(group, value) {
   const next = normalizeComment(value);
   if ((fav.comment || "") === next) return;
   fav.comment = next;
+  // Re-flag for sync but keep updatedAt: it drives the "added" sort order, and
+  // editing a comment must not re-position the favorite.
   fav.status = "pending";
-  fav.updatedAt = new Date().toISOString();
   await DB.put("favorites", fav);
   renderFav();
   if (navigator.onLine) syncFavorites().then(updateStatus);

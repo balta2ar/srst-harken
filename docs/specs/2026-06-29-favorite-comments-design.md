@@ -76,16 +76,21 @@ comment edit wins over a stale server `comment` until it flushes.
 1. Resolve the target record: `fav = group[0]` by its `id`.
 2. Normalize `value` (trim trailing whitespace; treat whitespace-only as `""`).
 3. If unchanged vs. the stored `comment`, no-op (avoid needless re-push).
-4. Write the record: `comment = value`, `status = "pending"`,
-   `updatedAt = now`.
-5. `renderFav()` to repaint the row (tint + comment text / placeholder).
+4. Write the record: `comment = value`, `status = "pending"`. **Do NOT bump
+   `updatedAt`** — it drives the "added" sort order, and editing a comment must
+   not re-position the favorite (the push path keys off `status`, not
+   `updatedAt`, so the comment still syncs).
+5. `renderFav()` to repaint the row (tint + comment text).
 6. If `navigator.onLine`, `syncFavorites().then(updateStatus)`.
 
 The existing flush loop's `pending` branch (`app.js:1020-1024`) calls
 `Api.favAdd(f)`, which now includes `comment`. The server's `ON CONFLICT`
 updates only `end/text/comment/updated_at` (preserves `created_at` and
 `exported_at`). Reconcile then flips the record back to `synced` and copies the
-server `comment` down (identical value).
+server `comment` down (identical value). The local `updatedAt` is left untouched
+throughout — the flush write-back reuses the same local object, and reconcile's
+synced-block does not copy the server `updated_at` onto an existing row — so the
+favorite keeps its position across the full edit → push → reconcile round-trip.
 
 Re-flagging an already-`synced` favorite to `pending` re-uses the existing push
 path verbatim — the only behavioral change is that `favAdd` now carries `comment`.
