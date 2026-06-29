@@ -590,6 +590,39 @@ function buildExportText(joinedText, comment) {
   return c ? joinedText + "\n\n" + c : joinedText;
 }
 
+async function saveComment(group, value) {
+  const fav = await DB.get("favorites", group[0].id);
+  if (!fav) return;
+  const next = normalizeComment(value);
+  if ((fav.comment || "") === next) return;
+  fav.comment = next;
+  fav.status = "pending";
+  fav.updatedAt = new Date().toISOString();
+  await DB.put("favorites", fav);
+  renderFav();
+  if (navigator.onLine) syncFavorites().then(updateStatus);
+}
+
+function openCommentEditor(group, host) {
+  const ta = document.createElement("textarea");
+  ta.className = "fav-comment-edit";
+  ta.value = group[0].comment || "";
+  let done = false;
+  const grow = () => { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; };
+  const commit = () => { if (done) return; done = true; saveComment(group, ta.value); };
+  const cancel = () => { if (done) return; done = true; renderFav(); };
+  ta.addEventListener("input", grow);
+  ta.addEventListener("blur", commit);
+  ta.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); cancel(); }
+    else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); ta.blur(); }
+  });
+  host.replaceWith(ta);
+  ta.focus();
+  ta.setSelectionRange(ta.value.length, ta.value.length);
+  grow();
+}
+
 async function toggleFavorite(ln, star) {
   // Identity uses the VTT-string start so it matches the server (which stores
   // start as a VTT string). tl.lines carries startStr; Favorites-view callers
@@ -808,6 +841,13 @@ async function _renderFav() {
     if (group.length > 1) meta.appendChild(document.createTextNode(` · ${group.length} lines`));
     body.appendChild(t);
     body.appendChild(meta);
+    const comment = (group[0].comment || "");
+    if (comment) row.classList.add("has-comment");
+    const cmt = document.createElement("div");
+    cmt.className = comment ? "fav-comment" : "fav-comment placeholder";
+    cmt.textContent = comment || "+ add comment";
+    cmt.onclick = () => openCommentEditor(group, cmt);
+    body.appendChild(cmt);
     const play = document.createElement("button");
     play.className = "play";
     play.dataset.clip = clipSpan(group).id;
