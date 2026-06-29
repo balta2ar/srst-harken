@@ -984,7 +984,7 @@ async function exportGroup(group) {
   const first = group[0], last = group[group.length - 1];
   const payload = {
     filename: first.filename, start: first.start, end: last.end || last.start,
-    text: group.map((f) => f.text).join(" "),
+    text: buildExportText(group.map((f) => f.text).join(" "), group[0].comment),
   };
   const r = await Api.exportFav(payload);
   if (!r.ok) {
