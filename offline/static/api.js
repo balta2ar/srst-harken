@@ -36,6 +36,7 @@ const Api = (() => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         filename: fav.filename, start: fav.start, end: fav.end, text: fav.text,
+        comment: fav.comment || "",
       }),
     });
   }

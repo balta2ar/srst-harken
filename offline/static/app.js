@@ -601,7 +601,7 @@ async function toggleFavorite(ln, star) {
   if (!existing) {
     await DB.put("favorites", {
       id, filename: ln.vtt, start: startStr, end: endStr, text: ln.text,
-      status: "pending", updatedAt: new Date().toISOString(),
+      comment: "", status: "pending", updatedAt: new Date().toISOString(),
     });
     if (star) star.textContent = "★";
   } else if (existing.status === "synced") {
@@ -1064,13 +1064,14 @@ async function reconcileFavorites(serverByKey) {
     if (!local) {
       await DB.put("favorites", {
         id: key, filename: s.filename, start: s.start, end: s.end || "",
-        text: s.text || "", status: "synced",
+        text: s.text || "", comment: s.comment || "", status: "synced",
         updatedAt: s.updated_at || new Date().toISOString(),
         exported_at: s.exported_at || null,
       });
     } else if (local.status === "synced") {
       local.text = s.text || "";
       local.end = s.end || "";
+      local.comment = s.comment || "";
       local.exported_at = s.exported_at || null;
       await DB.put("favorites", local);
     }
