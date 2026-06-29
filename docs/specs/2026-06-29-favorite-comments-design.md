@@ -102,16 +102,23 @@ In `_renderFav`'s per-group loop (`app.js:770-831`):
 * `body` is laid out meta-first so the text and comment stay adjacent: append
   the `meta` line (podcast · date · N lines) at the TOP of `body`, then the
   favorite text, then the comment element.
-* After the text, append a comment element:
-  * If `group[0].comment` is non-empty: a `div.fav-comment` showing the comment
-    text (preserve newlines via `white-space: pre-wrap`); add class `has-comment`
-    to the `.fav` row.
-  * Else: a `div.fav-comment.placeholder` showing a muted `+ add comment`.
+* The left column holds the timestamp in a `div.fav-ts-col` (a small flex
+  column). When the favorite has NO comment, a `+` button (`.fav-add-comment`)
+  is appended under the timestamp as the "add comment" affordance — there is no
+  inline placeholder line in the body.
+* After the text, append a comment slot `div.fav-comment`:
+  * If `group[0].comment` is non-empty: it shows the comment text (preserve
+    newlines via `white-space: pre-wrap`), is click-to-edit, and the `.fav` row
+    gets class `has-comment`.
+  * Else: it is left EMPTY (collapses via `.fav-comment:empty`) and serves as the
+    mount target for the editor when the `+` is clicked.
 * The comment text renders at the same size as the favorite text (no explicit
   font-size; inherits the row), styled grey.
-* Clicking the comment element (text or placeholder) replaces it in place with a
-  `<textarea.fav-comment-edit>` pre-filled with the current comment, focused,
-  caret at end, auto-sized to its content.
+* Opening the editor (clicking the comment text, or the `+` under the timestamp)
+  replaces the body comment slot in place with a `<textarea.fav-comment-edit>`
+  pre-filled with the current comment, focused, caret at end, auto-sized. The
+  editor always mounts in the body slot, never under the timestamp. The `+`
+  stays visible and inert while editing.
 
 Editor behavior (a small helper `openCommentEditor(group, host)`):
 
@@ -155,9 +162,13 @@ In `app.css`, favorites block:
 
 * `.fav.has-comment { background: #eef6ec; }`
 * `.fav .meta { ... margin-bottom: .15rem; }` (meta now sits above the text)
+* `.fav-ts-col { display: flex; flex-direction: column; align-items: flex-start;
+  gap: .1rem; flex-shrink: 0; align-self: flex-start; }`
+* `.fav-add-comment { font-size: 1rem; line-height: 1; color: #bbb; padding: 0; }`
+  with `:hover { color: #0d6efd; }` (the `+` under the timestamp)
 * `.fav-comment { color: #555; white-space: pre-wrap; cursor: text;
-  margin-top: .15rem; }` (no font-size — matches the favorite text size)
-* `.fav-comment.placeholder { color: #aaa; font-style: italic; }`
+  margin-top: .15rem; }` (no font-size — matches the favorite text size);
+  `.fav-comment:empty { margin-top: 0; }` so an empty slot adds no gap
 * `.fav-comment-edit { width: 100%; box-sizing: border-box; font: inherit;
   resize: none; overflow: hidden; }`
 

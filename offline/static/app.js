@@ -819,6 +819,9 @@ async function _renderFav() {
     ts.textContent = await epStartForFav(group[0]);
     ts.title = "Jump to this moment";
     ts.onclick = () => jumpToFavorite(file, group[0].start);
+    const tsCol = document.createElement("div");
+    tsCol.className = "fav-ts-col";
+    tsCol.appendChild(ts);
     const body = document.createElement("div");
     body.className = "text";
     const t = document.createElement("div");
@@ -844,10 +847,18 @@ async function _renderFav() {
     const comment = (group[0].comment || "");
     if (comment) row.classList.add("has-comment");
     const cmt = document.createElement("div");
-    cmt.className = comment ? "fav-comment" : "fav-comment placeholder";
-    cmt.textContent = comment || "+ add comment";
-    cmt.onclick = () => openCommentEditor(group, cmt);
+    cmt.className = "fav-comment";
+    cmt.textContent = comment;
+    if (comment) cmt.onclick = () => openCommentEditor(group, cmt);
     body.appendChild(cmt);
+    if (!comment) {
+      const addCmt = document.createElement("button");
+      addCmt.className = "fav-add-comment";
+      addCmt.textContent = "+";
+      addCmt.title = "Add comment";
+      addCmt.onclick = () => openCommentEditor(group, cmt);
+      tsCol.appendChild(addCmt);
+    }
     const play = document.createElement("button");
     play.className = "play";
     play.dataset.clip = clipSpan(group).id;
@@ -870,7 +881,7 @@ async function _renderFav() {
     del.title = "Delete";
     del.textContent = "🗑";
     del.onclick = () => deleteGroup(group);
-    row.appendChild(ts);
+    row.appendChild(tsCol);
     row.appendChild(body);
     const actions = document.createElement("div");
     actions.className = "fav-actions";
