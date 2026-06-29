@@ -511,11 +511,22 @@ async function seekEp(epTarget) {
   el.player.play();
 }
 
+function followActive(li) {
+  // Page-style follow: leave the line alone while it's still visible above the
+  // transport; once it reaches the bottom, jump it to the top so a full screen
+  // of upcoming lines is revealed (rare large scroll, not constant nudging).
+  if (el.transport.hidden) return;
+  const top = el.transport.getBoundingClientRect().top;
+  if (li.getBoundingClientRect().bottom >= top) {
+    li.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
+}
+
 function setActive(idx) {
   if (idx === currentLine) return;
   el.lines.querySelectorAll(".line.active").forEach((n) => n.classList.remove("active"));
   const li = el.lines.querySelector(`.line[data-index="${idx}"]`);
-  if (li) { li.classList.add("active"); if (autoscroll) li.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
+  if (li) { li.classList.add("active"); if (autoscroll) followActive(li); }
   currentLine = idx;
 }
 
