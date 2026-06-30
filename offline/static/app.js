@@ -69,12 +69,13 @@ el.navFind.onclick = () => { renderFind(); showView("find"); };
 el.navListen.onclick = () => { showView("listen"); setTimeout(() => scrollToCurrent("auto"), 0); };
 el.navFav.onclick = () => {
   showView("fav");
-  renderFav();
+  scheduleRenderFav();
+  Sync.request("favorites");
+  schedulePrefetchClips();
   if (navigator.onLine) {
-    syncFavorites().then(() => { renderFav(); prefetchClips(); });
-    refineFavOrder().then((learned) => { if (learned) renderFav(); });
-  } else {
-    prefetchClips();
+    refineFavOrder().then((learned) => {
+      if (learned) Events.emit("favorites:changed", { reason: "line-order-learned" });
+    });
   }
 };
 el.clipPlayer.addEventListener("ended", stopClip);
@@ -93,6 +94,32 @@ async function updateStatus() {
   el.favCount.textContent = active.length;
   el.favCount.hidden = active.length === 0;
 }
+
+const scheduleFavoriteStatus = Job.coalesce(updateStatus);
+const scheduleFavoriteMarks = Job.coalesce(async () => { if (tl) renderMarks(); });
+const scheduleRenderFav = Job.coalesce(async () => {
+  if (el.viewFav.hidden) return;
+  await renderFav();
+});
+const schedulePrefetchClips = Job.debounce(async () => {
+  if (!navigator.onLine) return;
+  await prefetchClips();
+}, 2000);
+
+Events.on("favorites:changed", (detail) => {
+  scheduleFavoriteStatus();
+  scheduleFavoriteMarks();
+  scheduleRenderFav();
+  schedulePrefetchClips();
+  if (isLocalIntent(detail.reason)) Sync.request("favorites");
+});
+
+Events.on("favorites:synced", () => {
+  scheduleFavoriteStatus();
+  scheduleRenderFav();
+  schedulePrefetchClips();
+});
+
 window.addEventListener("online", () => {
   syncFavorites().then(updateStatus);
   syncListens().then(refreshRecentIfActive);
@@ -606,8 +633,7 @@ async function saveComment(group, value) {
   // editing a comment must not re-position the favorite.
   fav.status = "pending";
   await DB.put("favorites", fav);
-  renderFav();
-  if (navigator.onLine) syncFavorites().then(updateStatus);
+  Events.emit("favorites:changed", { reason: "comment-edit", ids: [fav.id] });
 }
 
 function openCommentEditor(group, host) {
@@ -617,7 +643,7 @@ function openCommentEditor(group, host) {
   let done = false;
   const grow = () => { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; };
   const commit = () => { if (done) return; done = true; saveComment(group, ta.value); };
-  const cancel = () => { if (done) return; done = true; renderFav(); };
+  const cancel = () => { if (done) return; done = true; scheduleRenderFav(); };
   ta.addEventListener("input", grow);
   ta.addEventListener("blur", commit);
   ta.addEventListener("keydown", (e) => {
@@ -638,24 +664,27 @@ async function toggleFavorite(ln, star) {
   const endStr = ln.endStr || ln.end;
   const id = ln.vtt + "|" + startStr;
   const existing = await DB.get("favorites", id);
+  let active;
   if (!existing) {
     await DB.put("favorites", {
       id, filename: ln.vtt, start: startStr, end: endStr, text: ln.text,
       comment: "", status: "pending", updatedAt: new Date().toISOString(),
     });
-    if (star) star.textContent = "★";
+    active = true;
   } else if (existing.status === "synced") {
     existing.status = "deleted";
     existing.updatedAt = new Date().toISOString();
     await DB.put("favorites", existing);
-    if (star) star.textContent = "☆";
+    active = false;
   } else {
     await DB.del("favorites", id);
-    if (star) star.textContent = "☆";
+    active = false;
   }
-  updateStatus();
-  renderMarks();
-  if (navigator.onLine) syncFavorites().then(updateStatus);
+  if (star) star.textContent = active ? "★" : "☆";
+  Events.emit("favorites:changed", {
+    reason: active ? "local-add" : "local-remove",
+    ids: [id],
+  });
 }
 
 async function epStartForFav(f) {
