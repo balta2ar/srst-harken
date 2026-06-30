@@ -137,11 +137,20 @@ Events.on("listens:synced", () => {
   scheduleRenderRecent();
 });
 
-window.addEventListener("online", () => {
-  syncFavorites().then(updateStatus);
-  syncListens().then(refreshRecentIfActive);
+window.addEventListener("online", () => Events.emit("network:online"));
+window.addEventListener("offline", () => Events.emit("network:offline"));
+
+Events.on("network:online", () => {
+  scheduleFavoriteStatus();
+  scheduleRecentCount();
+  Sync.request("all");
+  schedulePrefetchClips();
 });
-window.addEventListener("offline", updateStatus);
+
+Events.on("network:offline", () => {
+  scheduleFavoriteStatus();
+  scheduleRecentCount();
+});
 
 // ---------- Find ----------
 const REINDEX_REFRESH_MS = 5000;
@@ -1338,22 +1347,22 @@ async function _renderListened() {
   el.viewRecent.replaceChildren(frag);
 }
 
-function refreshRecentIfActive() {
-  if (!el.viewRecent.hidden) renderListened();
-}
-
 // ---------- Boot ----------
 (async function boot() {
-  await updateStatus();
-  await updateRecentCount();
+  Sync.register("favorites", {
+    run: syncFavorites, synced: "favorites:synced", changed: "favorites:changed",
+  });
+  Sync.register("listens", {
+    run: syncListens, synced: "listens:synced", changed: "listens:changed",
+  });
+
+  scheduleFavoriteStatus();
+  scheduleRecentCount();
   setInterval(recordListen, 5000);
-  if (navigator.onLine) {
-    await syncFavorites();
-    await updateStatus();
-    await syncListens();
-    await updateRecentCount();
-  }
-  prefetchClips();
+
+  if (navigator.onLine) Sync.request("all");
+
+  schedulePrefetchClips();
   renderFind();
   showView("find");
 })();
