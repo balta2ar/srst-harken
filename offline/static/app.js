@@ -114,8 +114,9 @@ Events.on("favorites:changed", (detail) => {
   if (isLocalIntent(detail.reason)) Sync.request("favorites");
 });
 
-Events.on("favorites:synced", () => {
+Events.on("favorites:synced", (detail) => {
   scheduleFavoriteStatus();
+  if (!detail.changed) return;
   scheduleRenderFav();
   schedulePrefetchClips();
 });
@@ -132,8 +133,9 @@ Events.on("listens:changed", (detail) => {
   if (isLocalIntent(detail.reason)) Sync.request("listens");
 });
 
-Events.on("listens:synced", () => {
+Events.on("listens:synced", (detail) => {
   scheduleRecentCount();
+  if (!detail.changed) return;
   scheduleRenderRecent();
 });
 
