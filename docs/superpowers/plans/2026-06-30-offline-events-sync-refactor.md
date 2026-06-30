@@ -437,6 +437,7 @@ async function reconcileFavorites(serverByKey) {
       await DB.put("favorites", local);
       changed = true;
     }
+    // local pending/deleted: leave untouched (intent wins; flush already attempted)
   }
   for (const f of locals) {
     if (f.status === "synced" && !serverByKey[f.id]) {
