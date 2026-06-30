@@ -330,22 +330,48 @@ Suggested `reason` values:
 
 Favorites:
 
-- `local-add`
-- `local-remove`
-- `comment-edit`
-- `exported`
-- `server-reconcile`
-- `line-order-learned`
+- `local-add` — sync
+- `local-remove` — sync
+- `comment-edit` — sync
+- `exported` — sync (stamps `exported_at`, must push)
+- `server-reconcile` — **no sync** (came from server; would loop)
+- `line-order-learned` — **no sync** (local cache refinement only; no
+  server-relevant change)
 
 Listens:
 
-- `local-record`
-- `local-record-pruned`
-- `server-reconcile`
+- `local-record` — sync
+- `local-record-pruned` — sync
+- `server-reconcile` — **no sync**
 
-Use `reason` to avoid sync loops. For example, `favorites:changed` with
-`reason: "server-reconcile"` should update UI, but should not request another
-favorite sync.
+### Suppressing sync loops — use an allowlist, not a denylist
+
+Whether a `*:changed` event requests a sync is decided by a single predicate, so
+that read-only reasons (server reconcile, local cache refinement, and any future
+ones) are safe by default. Do **not** special-case only `server-reconcile`: that
+denylist would let `line-order-learned` fall through and fire a pointless
+favorites sync every time line order is refined.
+
+```js
+const SYNC_TRIGGERING_REASONS = new Set([
+  "local-add", "local-remove", "comment-edit", "exported",
+  "local-record", "local-record-pruned",
+]);
+function isLocalIntent(reason) {
+  return SYNC_TRIGGERING_REASONS.has(reason);
+}
+```
+
+`*:changed` subscribers always update UI (counts/marks/renders); they request a
+sync only when `isLocalIntent(detail.reason)`.
+
+### `refineFavOrder` emits `line-order-learned`
+
+`refineFavOrder` (the background line-order refinement on opening Favorites)
+currently calls `renderFav()` directly when it learns new order. After the
+refactor it must instead emit `favorites:changed { reason: "line-order-learned" }`
+so the visible Favorites re-renders through the scheduled job — and, because that
+reason is not in the allowlist, it must NOT trigger a favorites sync.
 
 ## Favorites refactor
 
@@ -382,7 +408,7 @@ Events.on("favorites:changed", (detail) => {
   scheduleRenderFav();
   schedulePrefetchClips();
 
-  if (detail.reason !== "server-reconcile") Sync.request("favorites");
+  if (isLocalIntent(detail.reason)) Sync.request("favorites");
 });
 
 Events.on("favorites:synced", () => {
@@ -396,6 +422,8 @@ Events.on("favorites:synced", () => {
 
 `toggleFavorite`, `saveComment`, delete-group logic, export marking, and server
 reconcile should emit `favorites:changed` after durable local state changes.
+(`refineFavOrder` also emits it, with `reason: "line-order-learned"` — see the
+reasons section; that reason updates UI but does not trigger sync.)
 
 Example target shape for `toggleFavorite`:
 
@@ -468,7 +496,7 @@ Events.on("listens:changed", (detail) => {
   scheduleRecentCount();
   scheduleRenderRecent();
 
-  if (detail.reason !== "server-reconcile") Sync.request("listens");
+  if (isLocalIntent(detail.reason)) Sync.request("listens");
 });
 
 Events.on("listens:synced", () => {
@@ -476,6 +504,17 @@ Events.on("listens:synced", () => {
   scheduleRenderRecent();
 });
 ```
+
+**Behavior change — playback position now syncs every ~5s (intended).** Today
+`recordListen` writes IndexedDB but does *not* upload; positions sit local and
+upload only on boot / `online` / opening Recent (the "lazy upload" asymmetry in
+`docs/sync-model.md`). Under this model the 5-second `recordListen` tick emits
+`listens:changed { reason: "local-record" }`, which is a local-intent reason, so
+it requests a (debounced) listen sync. This deliberately removes the lazy-upload
+asymmetry: resume positions now reach the server promptly instead of lagging
+until the next Recent visit. Each 5s tick is its own upload (750ms debounce does
+not coalesce ticks that are 5s apart); that is acceptable and expected. Update
+`docs/sync-model.md` to match once this lands.
 
 ### `recordListen()`
 
@@ -620,6 +659,19 @@ and `syncListens` are defined.
 There is no full automated frontend test suite. At minimum:
 
 - `node --check offline/static/events.js offline/static/job.js offline/static/sync.js offline/static/app.js offline/static/api.js offline/static/db.js offline/static/timeline.js`
+- **Unit-test `job.js` (`Job.coalesce` / `Job.debounce`).** This is the only
+  genuinely tricky, bug-prone code in this pass, and it is pure — no IndexedDB,
+  no DOM — so it must have real automated coverage rather than relying on the eye.
+  Write a `node --test` harness run from `/tmp/opencode` per `AGENTS.md` (extract
+  the `Job` IIFE source, or load `job.js` directly), using fake/controlled timers
+  for `debounce`. Cover at minimum:
+  - `coalesce`: a single call runs `fn` once; calls made *while* `fn` is running
+    collapse into exactly one follow-up run; multiple overlapping schedules still
+    yield only one follow-up.
+  - `debounce`: rapid schedules within `wait` collapse to one run after `wait`; a
+    schedule that lands while `fn` is in flight produces exactly one trailing run
+    `wait` ms after the in-flight pass finishes (the lost-write guard); no
+    overlap of `fn` with itself.
 - Smoke render the offline app on a spare port as described in `AGENTS.md`.
 - Manual browser checks:
   - Add a favorite: star updates immediately; Favorites badge updates; scrubber
