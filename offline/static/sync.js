@@ -15,7 +15,7 @@ const Sync = (() => {
         const changed = await syncer.run();
         Events.emit(syncer.synced, { changed });
         if (changed) Events.emit(syncer.changed, { reason: "server-reconcile" });
-      } catch (e) { /* domain stays queued; isolate other domains */ }
+      } catch (e) { /* isolate domains: a failed one is skipped this pass, retried on the next trigger */ }
     }
   }, 750);
 
