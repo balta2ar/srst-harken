@@ -43,11 +43,14 @@ version number.
   `pending` → `Api.favAdd` → `POST /api/favorite` → `POST /uttale/Favorites`
   (upsert); `deleted` → `Api.favDel` → `DELETE /uttale/Favorites`. On success a
   `pending` flips to `synced` (`app.js:1086`); a `deleted` tombstone is removed.
-* **Sync up fires on:** ① app boot (`app.js:1287`), ② the browser `online` event
-  (`app.js:90-91`), ③ opening the **Favorites tab** (`app.js:64-72`), and
-  ④ **immediately after every favorite edit** if online (`toggleFavorite`
-  `app.js:652`, `saveComment` `app.js:604`). So favorites reach the server right
-  away.
+* **Sync up fires on:** ① app boot (`Sync.request("all")`, `app.js:1363`), ② the
+  browser `online` event (`network:online` → `app.js:146`), ③ opening the
+  **Favorites tab** (`Sync.request("favorites")`, `app.js:73`), and ④
+  **immediately after every favorite edit** if online — each mutation emits
+  `favorites:changed` (`toggleFavorite` `app.js:710`, `saveComment`
+  `app.js:662`) and the subscriber requests a debounced `Sync.request("favorites")`
+  (`app.js:114`). So favorites still reach the server right away (debounced
+  ~750ms), now via the event/sync bus rather than a direct `syncFavorites` call.
 * **Sync down:** the same `syncFavorites` call then pulls `GET /uttale/Favorites`
   and reconciles (`reconcileFavorites`, `app.js:1106-1136`).
 * **Conflict rule — status-based / local-intent-wins:** unflushed
@@ -57,21 +60,29 @@ version number.
   server payload aborts reconcile (`app.js:1098`) so it can never wipe the local
   mirror.
 
-### listened (resume position) — persists often, uploads lazily
+### listened (resume position) — persists often, uploads promptly (debounced)
 
 * **Persist (IndexedDB):** captured **every 5 seconds while audio is playing**
-  (`setInterval(recordListen, 5000)`, `app.js:1285`; the callback early-returns
-  unless playing, `app.js:1147`), **plus** forced **on `play`** (`app.js:555`)
-  and **on `pause`** (`app.js:556`). NOT on `timeupdate`, NOT on `ended`. Only
+  (`setInterval(recordListen, 5000)`, `app.js:1361`; the callback early-returns
+  unless playing, `app.js:1211`), **plus** forced **on `play`** (`app.js:614`)
+  and **on `pause`** (`app.js:615`). NOT on `timeupdate`, NOT on `ended`. Only
   the 10 most-recent files are kept (`pruneListened`, `LISTENS_LIMIT = 10`). The
   saved position is episode-absolute time (`offset + currentTime`), VTT-formatted
-  (`app.js:1150-1152`).
-* **Sync up — the key asymmetry:** `recordListen` does **NOT** upload after
-  writing. Positions sit locally as `status:"pending"` and upload only on ① app
-  boot (`app.js:1289`), ② the `online` event (`app.js:92`), or ③ opening the
-  **Recent Listens tab** (`app.js:75-79`). So "where you left off" can lag the
-  server until you visit Recent or restart. (`syncListens` phase 1,
-  `app.js:1175-1181`: `pending` → `Api.listenPut` → `POST /uttale/Listens`.)
+  (`app.js:1214-1216`).
+* **Sync up — promptly, via the event/sync bus:** since the events/sync
+  refactor, `recordListen` writes IndexedDB (`status:"pending"`) and then
+  **emits `listens:changed`** with `reason:"local-record"` (or
+  `"local-record-pruned"` when pruning fired, `app.js:1221-1224`). Both reasons
+  are in the `isLocalIntent` allowlist (`SYNC_TRIGGERING_REASONS`,
+  `app.js:45-49`), so the subscriber calls `Sync.request("listens")`
+  (`app.js:129-133`), which **debounces ~750ms then runs `syncListens`** (up &
+  down). Because `recordListen` is driven by the 5 s timer (plus `play`/`pause`),
+  the resume position now reaches the server roughly **every ~5 s while playing**
+  — each tick is its own upload (a 750ms debounce can't coalesce ticks 5 s
+  apart). App boot (`Sync.request("all")`, `app.js:1363`), the `network:online`
+  event (`app.js:146`), and opening the **Recent Listens tab** (`app.js:85`)
+  **still also** sync. (`syncListens` phase 1, `app.js:1244-1249`: `pending` →
+  `Api.listenPut` → `POST /uttale/Listens`.)
 * **Sync down:** the same `syncListens` call pulls `GET /uttale/Listens` and
   reconciles (`reconcileListens`, `app.js:1190-1211`).
 * **Conflict rule — timestamp last-write-wins:** newest `updated_at` wins
@@ -100,31 +111,60 @@ the server only on demand, and are treated as immutable once cached.
 
 ## Event taxonomy (what kicks what)
 
-* **App boot** (`boot()`, `app.js:1282-1295`): sync favorites + listens (up &
-  down), start the 5 s listen timer, prefetch clips.
-* **Tab switches** (`app.js:62-79`):
+Since the events/sync refactor, fan-out is **centralized through a small event
+bus** (`offline/static/events.js` — `Events.on`/`Events.emit`),
+`offline/static/job.js` (`Job.coalesce`/`Job.debounce` scheduling primitives),
+and `offline/static/sync.js` (`Sync.register`/`Sync.request`, a debounced serial
+domain syncer). Mutations no longer call `updateStatus`/`renderMarks`/`renderFav`/
+`renderListened`/`updateRecentCount`/`syncFavorites` directly; instead they emit
+`favorites:changed`/`listens:changed`, whose subscribers (`app.js:109-138`)
+**coalesce the UI jobs** (`Job.coalesce`) and **request a debounced sync**
+(`Sync.request`, ~750ms). Sync-loop suppression is an `isLocalIntent(reason)`
+**allowlist** (`SYNC_TRIGGERING_REASONS`, `app.js:45-49`): reasons
+`server-reconcile` and `line-order-learned` update the UI but do **not** trigger
+a sync. (Line numbers below are approximate; `app.js` changed substantially.)
+
+* **App boot** (`boot()`, `app.js:1351-1368`): register the favorites/listens
+  syncers with `Sync`, then `Sync.request("all")` (up & down for both), start the
+  5 s listen timer, prefetch clips.
+* **Tab switches** (`app.js:68-86`):
   * **Find** → no sync (renders cached episodes; search box debounced 600 ms).
   * **Listen** → no sync, no write.
-  * **Favorites** → full favorites sync (up & down) + clip prefetch + lineorder
-    refine.
-  * **Recent Listens** → full listens sync (up & down).
-* **`online` event** (`app.js:90-93`) → catch-up flush of **both** favorites and
-  listens.
-* **`offline` event** (`app.js:94`) → nothing but repaint the badge.
-* **Timer** → exactly one: `setInterval(recordListen, 5000)` (`app.js:1285`),
-  local write only, no server call.
-* **Audio events** → `play`/`pause` force-save listen position (local);
-  `timeupdate`/`ended` persist nothing.
+  * **Favorites** → `Sync.request("favorites")` (debounced up & down) + clip
+    prefetch + lineorder refine (a learned refinement emits
+    `favorites:changed {reason:"line-order-learned"}`, which re-renders but does
+    **not** sync).
+  * **Recent Listens** → `Sync.request("listens")` (debounced up & down).
+* **`online` event** (`app.js:140`) → emits `network:online`, whose subscriber
+  (`app.js:143-148`) repaints badges and fires `Sync.request("all")` — a
+  catch-up flush of **both** favorites and listens.
+* **`offline` event** (`app.js:141`) → emits `network:offline`, whose subscriber
+  (`app.js:150-153`) only repaints badges (no sync attempts).
+* **Timer** → `setInterval(recordListen, 5000)` (`app.js:1361`): writes the
+  position locally, then emits `listens:changed` → coalesced Recent-UI jobs +
+  debounced `Sync.request("listens")`, so each ~5 s tick pushes promptly.
+* **Audio events** → `play`/`pause` force-save the listen position
+  (`recordListen({force:true})`, `app.js:614-615`), which likewise emits
+  `listens:changed`; `timeupdate`/`ended` persist nothing.
 * **Per-edit** → star toggle, comment-edit blur, delete, export write favorites
-  locally + immediate up-sync if online.
+  locally and emit `favorites:changed` (`app.js:662/710` etc.); the subscriber
+  coalesces the status/marks/Favorites-render jobs and, for local-intent reasons,
+  `Sync.request("favorites")` (debounced up-sync when online).
 * **No `beforeunload` / `visibilitychange` / `pagehide` handler** → there is no
-  flush-on-tab-close. Kill the tab mid-playback without pausing and only the last
-  5 s tick survives locally, uploading on the next boot/online/Recent-visit.
+  flush-on-tab-close. But because each 5 s tick (and `play`/`pause`) now emits
+  `listens:changed` and debounced-pushes, the resume position is already on the
+  server within a few seconds of the last tick — killing the tab loses at most
+  the unsynced tail since the previous push.
 
 ## Notable asymmetries
 
-1. **Favorites push on edit; listens don't.** Favorites up-sync immediately after
-   a mutation; listen positions only upload on boot / `online` / Recent-tab.
+1. **Both favorites and listens push on local change** (no longer asymmetric).
+   Since the events/sync refactor, a favorite edit pushes **immediately** (on the
+   edit, via `favorites:changed`) and a listen position pushes on **each ~5 s
+   tick / `play` / `pause`** (via `listens:changed`) — both debounced through
+   `Sync.request` (~750ms) and both gated on `isLocalIntent(reason)`. Earlier the
+   resume position uploaded only on boot / `online` / Recent-tab; that lazy
+   asymmetry is gone (boot / `online` / Recent still also sync as catch-ups).
 2. **Comment edits do NOT bump `updatedAt`** (`app.js:602`), though they do set
    `status:"pending"`. `updatedAt` drives the "By added" sort
    (`groupUpdatedAt` desc, `app.js:898/915`), so editing a comment must not
