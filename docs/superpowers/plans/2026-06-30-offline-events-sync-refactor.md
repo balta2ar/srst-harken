@@ -469,6 +469,8 @@ async function syncFavorites() {
   }
   let data;
   try { data = await Api.favList(); } catch (e) { return changed; }
+  // Only reconcile against a well-formed list; never treat a missing/malformed
+  // payload as "server has zero favorites" (that would delete the local mirror).
   if (!data || !Array.isArray(data.results)) return changed;
   const serverByKey = {};
   for (const s of data.results) serverByKey[s.filename + "|" + s.start] = s;
