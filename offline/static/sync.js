@@ -11,9 +11,11 @@ const Sync = (() => {
     for (const domain of domains) {
       const syncer = syncers[domain];
       if (!syncer) continue;
-      const changed = await syncer.run();
-      Events.emit(syncer.synced, { changed });
-      if (changed) Events.emit(syncer.changed, { reason: "server-reconcile" });
+      try {
+        const changed = await syncer.run();
+        Events.emit(syncer.synced, { changed });
+        if (changed) Events.emit(syncer.changed, { reason: "server-reconcile" });
+      } catch (e) { /* domain stays queued; isolate other domains */ }
     }
   }, 750);
 
