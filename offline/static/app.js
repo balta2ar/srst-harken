@@ -81,8 +81,8 @@ el.navFav.onclick = () => {
 el.clipPlayer.addEventListener("ended", stopClip);
 el.navRecent.onclick = () => {
   showView("recent");
-  renderListened();
-  if (navigator.onLine) syncListens().then(renderListened);
+  scheduleRenderRecent();
+  Sync.request("listens");
 };
 
 async function updateStatus() {
@@ -118,6 +118,23 @@ Events.on("favorites:synced", () => {
   scheduleFavoriteStatus();
   scheduleRenderFav();
   schedulePrefetchClips();
+});
+
+const scheduleRecentCount = Job.coalesce(updateRecentCount);
+const scheduleRenderRecent = Job.coalesce(async () => {
+  if (el.viewRecent.hidden) return;
+  await renderListened();
+});
+
+Events.on("listens:changed", (detail) => {
+  scheduleRecentCount();
+  scheduleRenderRecent();
+  if (isLocalIntent(detail.reason)) Sync.request("listens");
+});
+
+Events.on("listens:synced", () => {
+  scheduleRecentCount();
+  scheduleRenderRecent();
 });
 
 window.addEventListener("online", () => {
@@ -1191,8 +1208,11 @@ async function recordListen(opts) {
     updated_at: new Date().toISOString(), status: "pending",
   };
   await DB.put("listened", rec);
-  await pruneListened();
-  updateRecentCount();
+  const pruned = await pruneListened();
+  Events.emit("listens:changed", {
+    reason: pruned ? "local-record-pruned" : "local-record",
+    ids: [filename],
+  });
 }
 
 async function pruneListened() {
