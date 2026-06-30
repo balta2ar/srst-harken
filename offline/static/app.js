@@ -42,6 +42,12 @@ let playingClipId = null; // id of the favorite clip currently playing (dedicate
 let favSort = "added";   // favorites sort mode: "added" (recent first) | "podcast" (podcast asc, date desc)
 const LISTENS_LIMIT = 10;  // keep only the N most recent listens (matches server)
 
+const SYNC_TRIGGERING_REASONS = new Set([
+  "local-add", "local-remove", "comment-edit", "exported",
+  "local-record", "local-record-pruned",
+]);
+function isLocalIntent(reason) { return SYNC_TRIGGERING_REASONS.has(reason); }
+
 function episodeKeyOf(vtt) { return vtt.split("/").slice(0, 3).join("/"); }
 function podcastOf(vtt) { return vtt.split("/")[1] || vtt; }
 function dateOf(vtt) { return vtt.split("/")[2] || ""; }
@@ -1077,30 +1083,26 @@ async function exportAllUnexported(btn) {
 }
 
 async function syncFavorites() {
-  if (!navigator.onLine) return;
-  // 1. sync up: flush local pending/deleted to the server
+  if (!navigator.onLine) return false;
+  let changed = false;
   for (const f of await DB.all("favorites")) {
     try {
       if (f.status === "pending") {
         const r = await Api.favAdd(f);
-        if (r.ok) { f.status = "synced"; await DB.put("favorites", f); }
+        if (r.ok) { f.status = "synced"; await DB.put("favorites", f); changed = true; }
       } else if (f.status === "deleted") {
         const r = await Api.favDel(f.filename, f.start);
-        if (r.ok || r.status === 404) await DB.del("favorites", f.id);
+        if (r.ok || r.status === 404) { await DB.del("favorites", f.id); changed = true; }
       }
     } catch (e) { /* stay queued */ }
   }
-  // 2. pull down + reconcile the server list into IndexedDB
   let data;
-  try { data = await Api.favList(); } catch (e) { return; }
-  // Only reconcile against a well-formed list; never treat a missing/malformed
-  // payload as "server has zero favorites" (that would delete the local mirror).
-  if (!data || !Array.isArray(data.results)) return;
+  try { data = await Api.favList(); } catch (e) { return changed; }
+  if (!data || !Array.isArray(data.results)) return changed;
   const serverByKey = {};
-  for (const s of data.results) {
-    serverByKey[s.filename + "|" + s.start] = s;
-  }
-  await reconcileFavorites(serverByKey);
+  for (const s of data.results) serverByKey[s.filename + "|" + s.start] = s;
+  const reconciled = await reconcileFavorites(serverByKey);
+  return changed || reconciled;
 }
 
 // Reconcile rule: local pending/deleted win until flushed; otherwise server wins;
@@ -1109,6 +1111,7 @@ async function reconcileFavorites(serverByKey) {
   const locals = await DB.all("favorites");
   const localById = {};
   for (const f of locals) localById[f.id] = f;
+  let changed = false;
 
   for (const key of Object.keys(serverByKey)) {
     const s = serverByKey[key];
@@ -1120,20 +1123,23 @@ async function reconcileFavorites(serverByKey) {
         updatedAt: s.updated_at || new Date().toISOString(),
         exported_at: s.exported_at || null,
       });
+      changed = true;
     } else if (local.status === "synced") {
       local.text = s.text || "";
       local.end = s.end || "";
       local.comment = s.comment || "";
       local.exported_at = s.exported_at || null;
       await DB.put("favorites", local);
+      changed = true;
     }
-    // local pending/deleted: leave untouched (intent wins; flush already attempted)
   }
   for (const f of locals) {
     if (f.status === "synced" && !serverByKey[f.id]) {
       await DB.del("favorites", f.id);
+      changed = true;
     }
   }
+  return changed;
 }
 
 // ---------- Listened ----------
@@ -1159,9 +1165,10 @@ async function recordListen(opts) {
 
 async function pruneListened() {
   const rows = await DB.all("listened");
-  if (rows.length <= LISTENS_LIMIT) return;
+  if (rows.length <= LISTENS_LIMIT) return false;
   rows.sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
   for (const r of rows.slice(LISTENS_LIMIT)) await DB.del("listened", r.id);
+  return true;
 }
 
 async function updateRecentCount() {
@@ -1171,26 +1178,29 @@ async function updateRecentCount() {
 }
 
 async function syncListens() {
-  if (!navigator.onLine) return;
+  if (!navigator.onLine) return false;
+  let changed = false;
   for (const r of await DB.all("listened")) {
     if (r.status !== "pending") continue;
     try {
       const res = await Api.listenPut(r.filename, r.position);
-      if (res.ok) { r.status = "synced"; await DB.put("listened", r); }
+      if (res.ok) { r.status = "synced"; await DB.put("listened", r); changed = true; }
     } catch (e) { /* stay pending; retried later */ }
   }
   let data;
-  try { data = await Api.listenList(); } catch (e) { return; }
-  if (!data || !Array.isArray(data.results)) return;
+  try { data = await Api.listenList(); } catch (e) { return changed; }
+  if (!data || !Array.isArray(data.results)) return changed;
   const serverByFile = {};
   for (const s of data.results) serverByFile[s.filename] = s;
-  await reconcileListens(serverByFile);
+  const reconciled = await reconcileListens(serverByFile);
+  return changed || reconciled;
 }
 
 async function reconcileListens(serverByFile) {
   const locals = await DB.all("listened");
   const localById = {};
   for (const r of locals) localById[r.id] = r;
+  let changed = false;
   for (const filename of Object.keys(serverByFile)) {
     const s = serverByFile[filename];
     const local = localById[filename];
@@ -1199,15 +1209,17 @@ async function reconcileListens(serverByFile) {
         id: filename, filename, position: s.position,
         updated_at: s.updated_at, status: "synced",
       });
+      changed = true;
     } else if (s.updated_at > local.updated_at) {
       local.position = s.position;
       local.updated_at = s.updated_at;
       local.status = "synced";
       await DB.put("listened", local);
+      changed = true;
     }
   }
-  await pruneListened();
-  updateRecentCount();
+  const pruned = await pruneListened();
+  return changed || pruned;
 }
 
 async function jumpToListen(rec) {
