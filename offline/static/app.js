@@ -86,13 +86,17 @@ el.navRecent.onclick = () => {
 };
 
 async function updateStatus() {
+  el.favCount.hidden = true;
   const favs = await DB.all("favorites");
   const active = favs.filter((f) => f.status !== "deleted");
   const pending = favs.filter((f) => f.status !== "synced").length;
   el.status.textContent = pending > 0 ? String(pending) : "";
   el.status.title = (navigator.onLine ? "online" : "offline") + ` · ${pending} pending`;
-  el.favCount.textContent = active.length;
-  el.favCount.hidden = active.length === 0;
+  const files = [...new Set(active.map((f) => f.filename))];
+  const indexOf = await resolveLocalOrder(files);
+  const count = groupFavorites(active, indexOf).length;
+  el.favCount.textContent = count > 0 ? String(count) : "";
+  el.favCount.hidden = count === 0;
 }
 
 const scheduleFavoriteStatus = Job.coalesce(updateStatus);
