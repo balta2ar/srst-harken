@@ -327,6 +327,26 @@ class Handler(BaseHTTPRequestHandler):
         logging.info("%s - %s", self.address_string(), fmt % args)
 
 
+class SSLThreadingHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+    handshake_timeout = 10
+
+    def __init__(self, server_address, handler_class, ssl_context):
+        super().__init__(server_address, handler_class)
+        self.ssl_context = ssl_context
+
+    def process_request_thread(self, request, client_address):
+        try:
+            request.settimeout(self.handshake_timeout)
+            request = self.ssl_context.wrap_socket(request, server_side=True)
+            request.settimeout(None)
+        except (OSError, ssl.SSLError) as e:
+            logging.info("TLS handshake failed from %s: %s", client_address[0], e)
+            self.shutdown_request(request)
+            return
+        super().process_request_thread(request, client_address)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--uttale", default=UTTALE,
@@ -342,13 +362,14 @@ def main():
     args = parser.parse_args()
 
     Handler.uttale = args.uttale.rstrip("/")
-    httpd = ThreadingHTTPServer((args.host, args.port), Handler)
     if args.ssl:
         cert, key = Path(args.ssl_cert), Path(args.ssl_key)
         ensure_cert(cert, key)
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.load_cert_chain(str(cert), str(key))
-        httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
+        httpd = SSLThreadingHTTPServer((args.host, args.port), Handler, ctx)
+    else:
+        httpd = ThreadingHTTPServer((args.host, args.port), Handler)
     scheme = "https" if args.ssl else "http"
     logging.info("srst-offline on %s://%s:%d -> %s",
                  scheme, args.host, args.port, Handler.uttale)
